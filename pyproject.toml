@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sqnm"
+version = "0.0.0"
+authors = [{ name = "Limao Chang" }]
+maintainers = [{ name = "Limao Chang" }]
+
+[tool.setuptools]
+packages = ["sqnm"]
