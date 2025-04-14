@@ -3,11 +3,18 @@ import numpy as np
 
 def strong_wolfe(f, grad_f, x_k, p_k, alpha0=1, c1=1e-4, c2=0.9, max_iters=200):
     """
-    For Newton and quasi-Newton methods, alpha0=1 should always be used as the
-    initial step size.
+    Finds an optimal step size that satisfies strong Wolfe conditions.
 
-    We assume pk is a descent direction, and that f is bounded below along the direction
-    p_k.
+    Parameters:
+        f: objective function, assumed to be bounded below along the direction p_k
+        grad_f: gradient of objective function
+        x_k: current iterate
+        p_k: direction, assumed to be a descent direction
+        alpha0: initial step size (1 should always be used as the initial step size for
+            Newton and quasi-Newton methods)
+        c1: parameter for Armijo/sufficient decrease condition
+        c2: parameter for curvature condition
+        max_iters: max number of line search iterations to compute
 
     REF: Algorithm 3.5 in Numerical Optimization by Nocedal and Wright
     """
