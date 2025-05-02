@@ -1,9 +1,19 @@
 import numpy as np
 
+from ..types import Matrix, ScalarFn, Vector, VectorFn
 from ..utils.line_search import strong_wolfe
 
 
-def l_bfgs(f, grad_f, x0, m=20, alpha0=1, tau=1e-4, max_iters=1_000, callback=None):
+def l_bfgs(
+    f: ScalarFn,
+    grad_f: VectorFn,
+    x0: Vector,
+    m: int = 20,
+    alpha0: float = 1,
+    tau: float = 1e-4,
+    max_iters: int = 1_000,
+    callback=None,
+) -> Vector:
     """
     Limited-memory BFGS Algorithm
 
@@ -35,7 +45,7 @@ def l_bfgs(f, grad_f, x0, m=20, alpha0=1, tau=1e-4, max_iters=1_000, callback=No
     sy_iterates[0] = (x_k, grad_f_x_k)
     id = np.identity(d)
 
-    def two_loop_recursion(H0, grad_f_k):
+    def two_loop_recursion(H0: Matrix, grad_f_k: Vector) -> Vector:
         """REF: Algorithm 7.4 in Numerical Optimization by Nocedal and Wright"""
         if k <= m:
             return H0.dot(grad_f_k)

@@ -2,12 +2,22 @@ import logging
 
 import numpy as np
 
+from ..types import ScalarFn, Vector, VectorFn
+
 logger = logging.getLogger(__name__)
 
 
 def strong_wolfe(
-    f, grad_f, x_k, p_k, alpha0=1, c1=1e-4, c2=0.9, max_iters=200, zoom_max_iters=20
-):
+    f: ScalarFn,
+    grad_f: VectorFn,
+    x_k: Vector,
+    p_k: Vector,
+    alpha0: float = 1,
+    c1: float = 1e-4,
+    c2: float = 0.9,
+    max_iters: int = 200,
+    zoom_max_iters: int = 20,
+) -> float:
     """
     Finds an optimal step size that satisfies strong Wolfe conditions.
 
@@ -26,17 +36,17 @@ def strong_wolfe(
     REF: Algorithm 3.5 in Numerical Optimization by Nocedal and Wright
     """
 
-    def phi(alpha):
+    def phi(alpha: float) -> float:
         return f(x_k + alpha * p_k)
 
-    def grad_phi(alpha):
+    def grad_phi(alpha: float) -> float:
         return grad_f(x_k + alpha * p_k).T.dot(p_k)
 
     # Initial values
     phi0 = phi(0)  # Note that phi0 = f(xk)
     grad_phi0 = grad_phi(0)
 
-    def zoom(a_lo, a_hi):
+    def zoom(a_lo: float, a_hi: float) -> float:
         """REF: Algorithm 3.6 in Numerical Optimization by Nocedal and Wright"""
 
         z_iters = 0
@@ -73,7 +83,7 @@ def strong_wolfe(
             )
         return a_j
 
-    alpha_prev = 0
+    alpha_prev = 0.0
     alpha_curr = alpha0
     alpha_star = alpha_curr  # Fallback, if something goes wrong
     phi_prev = phi0
@@ -101,7 +111,9 @@ def strong_wolfe(
     return alpha_star
 
 
-def cubic_interp(x1, x2, f1, f2, grad_f1, grad_f2):
+def cubic_interp(
+    x1: float, x2: float, f1: float, f2: float, grad_f1: float, grad_f2: float
+) -> float:
     """
     Find the minimizer of the Hermite-cubic polynomial interpolating a function
     of one variable, at the two points x1 and x2, using the function values f(x_1) = f1
@@ -115,10 +127,10 @@ def cubic_interp(x1, x2, f1, f2, grad_f1, grad_f2):
     return xmin
 
 
-def inside(x, a, b):
+def inside(x: float, a: float, b: float) -> bool:
     """Returns whether x is in (a, b)"""
     if not np.isreal(x):
-        return 0
+        return False
 
     a, b = min(a, b), max(a, b)
-    return int(a <= x <= b)
+    return a <= x <= b
