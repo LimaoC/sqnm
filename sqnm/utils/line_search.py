@@ -1,7 +1,13 @@
+import logging
+
 import numpy as np
 
+logger = logging.getLogger(__name__)
 
-def strong_wolfe(f, grad_f, x_k, p_k, alpha0=1, c1=1e-4, c2=0.9, max_iters=200):
+
+def strong_wolfe(
+    f, grad_f, x_k, p_k, alpha0=1, c1=1e-4, c2=0.9, max_iters=200, zoom_max_iters=20
+):
     """
     Finds an optimal step size that satisfies strong Wolfe conditions.
 
@@ -15,6 +21,7 @@ def strong_wolfe(f, grad_f, x_k, p_k, alpha0=1, c1=1e-4, c2=0.9, max_iters=200):
         c1: parameter for Armijo/sufficient decrease condition
         c2: parameter for curvature condition
         max_iters: max number of line search iterations to compute
+        zoom_max_iters: max number of zoom() iterations to compute
 
     REF: Algorithm 3.5 in Numerical Optimization by Nocedal and Wright
     """
@@ -23,7 +30,7 @@ def strong_wolfe(f, grad_f, x_k, p_k, alpha0=1, c1=1e-4, c2=0.9, max_iters=200):
         return f(x_k + alpha * p_k)
 
     def grad_phi(alpha):
-        return grad_f(alpha).T.dot(p_k)
+        return grad_f(x_k + alpha * p_k).T.dot(p_k)
 
     # Initial values
     phi0 = phi(0)  # Note that phi0 = f(xk)
@@ -31,9 +38,11 @@ def strong_wolfe(f, grad_f, x_k, p_k, alpha0=1, c1=1e-4, c2=0.9, max_iters=200):
 
     def zoom(a_lo, a_hi):
         """REF: Algorithm 3.6 in Numerical Optimization by Nocedal and Wright"""
-        while True:
-            # Interpolate to find a trial step length alpha_j between alpha_lo and
-            # a_hi
+
+        z_iters = 0
+        while z_iters < zoom_max_iters:
+            z_iters += 1
+            # Interpolate to find a trial step size a_j in [a_lo, a_hi]
             a_j = cubic_interp(
                 a_lo,
                 a_hi,
@@ -42,6 +51,10 @@ def strong_wolfe(f, grad_f, x_k, p_k, alpha0=1, c1=1e-4, c2=0.9, max_iters=200):
                 grad_phi(a_lo),
                 grad_phi(a_hi),
             )
+            # a_j should be in [a_lo, a_hi]... fallback to a_mid if not
+            a_mid = (a_lo + a_hi) / 2
+            if not inside(a_j, a_lo, a_mid):
+                a_j = a_mid
 
             phi_a_j = phi(a_j)
             if (phi_a_j > phi0 + c1 * a_j * grad_phi0) or phi_a_j >= phi(a_lo):
@@ -49,16 +62,20 @@ def strong_wolfe(f, grad_f, x_k, p_k, alpha0=1, c1=1e-4, c2=0.9, max_iters=200):
             else:
                 grad_phi_a_j = grad_phi(a_j)
                 if np.abs(grad_phi_a_j) <= -c2 * grad_phi0:
-                    a_star = a_j
                     break
                 if grad_phi_a_j * (a_hi - a_lo) >= 0:
                     a_hi = a_lo
                 a_lo = a_j
 
-        return a_star
+        if z_iters == zoom_max_iters:
+            logger.warning(
+                "zoom() returning without satisfying strong Wolfe conditions."
+            )
+        return a_j
 
     alpha_prev = 0
     alpha_curr = alpha0
+    alpha_star = alpha_curr  # Fallback, if something goes wrong
     phi_prev = phi0
 
     iters = 1
@@ -79,8 +96,8 @@ def strong_wolfe(f, grad_f, x_k, p_k, alpha0=1, c1=1e-4, c2=0.9, max_iters=200):
             break
 
         alpha_prev, alpha_curr = alpha_curr, alpha_curr * 2
+        phi_prev = phi_curr
         iters += 1
-
     return alpha_star
 
 
@@ -96,3 +113,12 @@ def cubic_interp(x1, x2, f1, f2, grad_f1, grad_f2):
     d2 = np.sign(x2 - x1) * np.sqrt(d1**2 - grad_f1 * grad_f2)
     xmin = x2 - (x2 - x1) * (grad_f2 + d2 - d1) / (grad_f2 - grad_f1 + 2 * d2)
     return xmin
+
+
+def inside(x, a, b):
+    """Returns whether x is in (a, b)"""
+    if not np.isreal(x):
+        return 0
+
+    a, b = min(a, b), max(a, b)
+    return int(a <= x <= b)
