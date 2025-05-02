@@ -1,4 +1,4 @@
-import np
+import numpy as np
 
 from ..utils.line_search import strong_wolfe
 
