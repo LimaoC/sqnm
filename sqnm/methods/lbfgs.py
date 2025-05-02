@@ -3,7 +3,7 @@ import numpy as np
 from ..utils.line_search import strong_wolfe
 
 
-def L_BFGS(f, grad_f, x0, m=20, alpha0=1, tau=1e-4, max_iters=1_000):
+def l_bfgs(f, grad_f, x0, m=20, alpha0=1, tau=1e-4, max_iters=1_000, callback=None):
     """
     Limited-memory BFGS Algorithm
 
@@ -19,6 +19,8 @@ def L_BFGS(f, grad_f, x0, m=20, alpha0=1, tau=1e-4, max_iters=1_000):
         c1: parameter for Armijo/sufficient decrease condition
         c2: parameter for curvature condition
         max_iters: max number of line search iterations to compute
+        callback: function to call at each iteration, takes the iteration number k,
+            iterate x_k, function iterate f(x_k), and gradient norm ||grad_f(x_k)||
 
     REF: Algorithm 7.5 in Numerical Optimization by Nocedal and Wright
     """
@@ -27,10 +29,10 @@ def L_BFGS(f, grad_f, x0, m=20, alpha0=1, tau=1e-4, max_iters=1_000):
     d = x0.shape[0]
     x_k = np.copy(x0)
     grad_f_x_k = grad_f(x_k)
+
     # Store the m previous (s_k, y_k) = (x_{k+1} - x_k, grad f(x_{k+1}) - grad f(x_k))
     sy_iterates = np.array([(np.zeros(d), np.zeros(d)) for _ in range(m)])
     sy_iterates[0] = (x_k, grad_f_x_k)
-
     id = np.identity(d)
 
     def two_loop_recursion(H0, grad_f_k):
@@ -51,6 +53,9 @@ def L_BFGS(f, grad_f, x0, m=20, alpha0=1, tau=1e-4, max_iters=1_000):
         return r
 
     while np.linalg.norm(grad_f_x_k) > tau and k <= max_iters:
+        if callback:
+            callback(k, x_k, f(x_k), np.linalg.norm(grad_f_x_k))
+
         if k == 0:
             p_k = -grad_f_x_k
         else:
@@ -68,4 +73,6 @@ def L_BFGS(f, grad_f, x0, m=20, alpha0=1, tau=1e-4, max_iters=1_000):
         sy_iterates[(k + 1) % m] = (x_k_next - x_k, grad_f_x_k_next - grad_f_x_k)
         x_k, grad_f_x_k = x_k_next, grad_f_x_k_next
         k += 1
+    if callback:
+        callback(k, x_k, f(x_k), np.linalg.norm(grad_f_x_k))
     return x_k
