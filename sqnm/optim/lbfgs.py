@@ -85,8 +85,9 @@ class LBFGS(Optimizer):
 
     def _two_loop_recursion(self, grad: Tensor) -> Tensor:
         """REF: Algorithm 7.4 in Numerical Optimization by Nocedal and Wright"""
-        m = self.param_groups[0]["history_size"]
+        group = self.param_groups[0]
         state = self.state[self._params[0]]
+        m = group["history_size"]
         k = state["num_iters"]
         sy_history = state["sy_history"]
 
@@ -119,11 +120,12 @@ class LBFGS(Optimizer):
         # Make sure the closure is always called with grad enabled
         closure = torch.enable_grad()(closure)
 
-        lr = self.param_groups[0]["lr"]
-        m = self.param_groups[0]["history_size"]
-        grad_tol = self.param_groups[0]["grad_tol"]
-        line_search_fn = self.param_groups[0]["line_search_fn"]
+        group = self.param_groups[0]
         state = self.state[self._params[0]]
+        lr = group["lr"]
+        m = group["history_size"]
+        grad_tol = group["grad_tol"]
+        line_search_fn = group["line_search_fn"]
         k = state["num_iters"]
         sy_history = state["sy_history"]
 
