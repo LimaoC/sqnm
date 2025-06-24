@@ -1,18 +1,20 @@
 import logging
+from functools import cache
+from typing import Callable
 
 import numpy as np
-
-from ..types import ScalarFn, Vector, VectorFn
+from torch import Tensor
 
 logger = logging.getLogger(__name__)
 
 
 def strong_wolfe(
-    f: ScalarFn,
-    grad_f: VectorFn,
-    x_k: Vector,
-    p_k: Vector,
-    alpha0: float = 1,
+    f: Callable[[Tensor], float],
+    grad_f: Callable[[Tensor], Tensor],
+    x_k: Tensor,
+    p_k: Tensor,
+    a0: float = 1,
+    a_max: float = 100,
     c1: float = 1e-4,
     c2: float = 0.9,
     max_iters: int = 200,
@@ -26,8 +28,9 @@ def strong_wolfe(
         grad_f: gradient of objective function
         x_k: current iterate
         p_k: direction, assumed to be a descent direction
-        alpha0: initial step size (1 should always be used as the initial step size for
+        a0: initial step size (1 should always be used as the initial step size for
             Newton and quasi-Newton methods)
+        a_max: maximum step size
         c1: parameter for Armijo/sufficient decrease condition
         c2: parameter for curvature condition
         max_iters: max number of line search iterations to compute
@@ -36,15 +39,13 @@ def strong_wolfe(
     REF: Algorithm 3.5 in Numerical Optimization by Nocedal and Wright
     """
 
-    def phi(alpha: float) -> float:
-        return f(x_k + alpha * p_k)
+    @cache
+    def phi(a_k: float) -> float:
+        return f(x_k + a_k * p_k)
 
-    def grad_phi(alpha: float) -> float:
-        return grad_f(x_k + alpha * p_k).T.dot(p_k)
-
-    # Initial values
-    phi0 = phi(0)  # Note that phi0 = f(xk)
-    grad_phi0 = grad_phi(0)
+    @cache
+    def grad_phi(a_k: float) -> float:
+        return grad_f(x_k + a_k * p_k).dot(p_k).item()
 
     def zoom(a_lo: float, a_hi: float) -> float:
         """REF: Algorithm 3.6 in Numerical Optimization by Nocedal and Wright"""
@@ -53,7 +54,7 @@ def strong_wolfe(
         while z_iters < zoom_max_iters:
             z_iters += 1
             # Interpolate to find a trial step size a_j in [a_lo, a_hi]
-            a_j = cubic_interp(
+            a_j = _cubic_interp(
                 a_lo,
                 a_hi,
                 phi(a_lo),
@@ -61,57 +62,58 @@ def strong_wolfe(
                 grad_phi(a_lo),
                 grad_phi(a_hi),
             )
-            # a_j should be in [a_lo, a_hi]... fallback to a_mid if not
-            a_mid = (a_lo + a_hi) / 2
-            if not inside(a_j, a_lo, a_mid):
-                a_j = a_mid
+            # a_j should be in [a_lo, a_hi]... fallback to the midpoint if not
+            if not _inside(a_j, a_lo, a_hi):
+                a_j = (a_lo + a_hi) / 2
 
-            phi_a_j = phi(a_j)
-            if (phi_a_j > phi0 + c1 * a_j * grad_phi0) or phi_a_j >= phi(a_lo):
+            # Armijo/sufficient decrease condition
+            if (phi(a_j) > phi(0) + c1 * a_j * grad_phi(0)) or phi(a_j) >= phi(a_lo):
                 a_hi = a_j
             else:
-                grad_phi_a_j = grad_phi(a_j)
-                if np.abs(grad_phi_a_j) <= -c2 * grad_phi0:
+                # Curvature condition
+                if np.abs(grad_phi(a_j)) <= -c2 * grad_phi(0):
                     break
-                if grad_phi_a_j * (a_hi - a_lo) >= 0:
+                if grad_phi(a_j) * (a_hi - a_lo) >= 0:
                     a_hi = a_lo
                 a_lo = a_j
 
         if z_iters == zoom_max_iters:
             logger.warning(
-                "zoom() returning without satisfying strong Wolfe conditions."
+                "zoom() returning without satisfying strong Wolfe conditions, "
+                "defaulting to alpha0 step size."
             )
+            return a0
         return a_j
 
-    alpha_prev = 0.0
-    alpha_curr = alpha0
-    alpha_star = alpha_curr  # Fallback, if something goes wrong
-    phi_prev = phi0
+    a_prev = 0.0
+    a_curr = a0
+    a_star = a_curr  # Fallback, if something goes wrong
+    phi_prev = phi(0)
 
     iters = 1
     while iters < max_iters:
-        phi_curr = phi(alpha_curr)
-        if (phi_curr > phi0 + c1 * alpha_curr * grad_phi0) or (
-            phi_curr >= phi_prev and iters > 1
-        ):
-            alpha_star = zoom(alpha_prev, alpha_curr)
+        # Armijo/sufficient decrease condition
+        armijo_cond = phi(a_curr) > phi(0) + c1 * a_curr * grad_phi(0)
+        if armijo_cond or (phi(a_curr) >= phi_prev and iters > 1):
+            a_star = zoom(a_prev, a_curr)
             break
 
-        grad_phi_curr = grad_phi(alpha_curr)
-        if np.abs(grad_phi_curr) <= -c2 * grad_phi0:
-            alpha_star = alpha_curr
-            break
-        if grad_phi_curr >= 0:
-            alpha_star = zoom(alpha_curr, alpha_prev)
+        # Curvature condition
+        if np.abs(grad_phi(a_curr)) <= -c2 * grad_phi(0):
+            a_star = a_curr
             break
 
-        alpha_prev, alpha_curr = alpha_curr, alpha_curr * 2
-        phi_prev = phi_curr
+        if grad_phi(a_curr) >= 0:
+            a_star = zoom(a_curr, a_prev)
+            break
+
+        a_prev, a_curr = a_curr, min(a_curr * 2, a_max)
+        phi_prev = phi(a_prev)
         iters += 1
-    return alpha_star
+    return a_star
 
 
-def cubic_interp(
+def _cubic_interp(
     x1: float, x2: float, f1: float, f2: float, grad_f1: float, grad_f2: float
 ) -> float:
     """
@@ -127,7 +129,7 @@ def cubic_interp(
     return xmin
 
 
-def inside(x: float, a: float, b: float) -> bool:
+def _inside(x: float, a: float, b: float) -> bool:
     """Returns whether x is in (a, b)"""
     if not np.isreal(x):
         return False
