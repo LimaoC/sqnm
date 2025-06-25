@@ -91,19 +91,17 @@ class LBFGS(Optimizer):
         k = state["num_iters"]
         sy_history = state["sy_history"]
 
-        s_prev, y_prev = sy_history[k % m]
+        s_prev, y_prev = sy_history[(k - 1) % m]
         H0 = s_prev.dot(y_prev) / y_prev.dot(y_prev) * torch.eye(grad.shape[0])
 
-        if k <= m:
-            return torch.matmul(H0, grad)
         q = grad.clone()
         alphas = torch.zeros(m)
-        for i in range(k - 1, k - m - 1, -1):
+        for i in range(k - 1, max(k - m, 0) - 1, -1):
             s_prev, y_prev = sy_history[i % m]
             alphas[i - (k - m)] = s_prev.dot(q) / s_prev.dot(y_prev)
             q -= alphas[i - (k - m)] * y_prev
         r = torch.matmul(H0, q)
-        for i in range(k - m, k):
+        for i in range(max(k - m, 0), k):
             s_prev, y_prev = sy_history[i % m]
             beta = y_prev.dot(r) / s_prev.dot(y_prev)
             r += (alphas[i - (k - m)] - beta) * s_prev
@@ -163,7 +161,7 @@ class LBFGS(Optimizer):
             x_k_next = x_k + lr * p_k
         # Compute and store next iterates
         grad_next = grad_f(x_k_next)
-        sy_history[(k + 1) % m] = (x_k_next - x_k, grad_next - grad)
+        sy_history[k % m] = (x_k_next - x_k, grad_next - grad)
 
         state["num_iters"] += 1
         return orig_loss
