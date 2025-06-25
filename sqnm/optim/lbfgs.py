@@ -90,9 +90,7 @@ class LBFGS(Optimizer):
         m = group["history_size"]
         k = state["num_iters"]
         sy_history = state["sy_history"]
-
         s_prev, y_prev = sy_history[(k - 1) % m]
-        H0 = s_prev.dot(y_prev) / y_prev.dot(y_prev) * torch.eye(grad.shape[0])
 
         q = grad.clone()
         alphas = torch.zeros(m)
@@ -100,7 +98,7 @@ class LBFGS(Optimizer):
             s_prev, y_prev = sy_history[i % m]
             alphas[i - (k - m)] = s_prev.dot(q) / s_prev.dot(y_prev)
             q -= alphas[i - (k - m)] * y_prev
-        r = torch.matmul(H0, q)
+        r = (s_prev.dot(y_prev) / y_prev.dot(y_prev)) * q
         for i in range(max(k - m, 0), k):
             s_prev, y_prev = sy_history[i % m]
             beta = y_prev.dot(r) / s_prev.dot(y_prev)
