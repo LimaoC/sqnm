@@ -1,0 +1,151 @@
+"""
+Online limited-memory BFGS algorithm
+
+REF: Schraudolph, N. N., Yu, J., & Günter, S. (2007). A Stochastic Quasi-Newton Method
+    for Online Convex Optimization.
+"""
+
+import logging
+from typing import Callable
+
+import torch
+from torch import Tensor
+from torch.optim import Optimizer
+from torch.optim.optimizer import ParamsT
+
+logger = logging.getLogger(__name__)
+
+
+class OLBFGS(Optimizer):
+    def __init__(
+        self,
+        params: ParamsT,
+        history_size: int = 20,
+        grad_tol: float = 1e-4,
+        eps: float = 1e-10,
+        eta0: float = 0.1 * 100 / (100 + 2),
+        tau: float = 2 * 10**4,
+        c: float = 0.1,
+    ):
+        """
+        Online limited-memory BFGS algorithm
+        """
+        if history_size < 1:
+            raise ValueError("oLBFGS history size must be positive")
+
+        defaults = dict(
+            history_size=history_size,
+            grad_tol=grad_tol,
+            eps=eps,
+            eta0=eta0,
+            tau=tau,
+            c=c,
+        )
+        super().__init__(params, defaults)
+
+        if len(self.param_groups) != 1:
+            raise ValueError("LBFGS doesn't support per-parameter options")
+
+        self._params: list[torch.nn.Parameter] = self.param_groups[0]["params"]
+
+        d = self._get_param_vector().shape[0]
+        m = history_size
+        # Store LBFGS state in first param
+        state = self.state[self._params[0]]
+        state["num_iters"] = 0
+        # Store the m previous (s, y) pairs
+        # s is the iterate difference, y is the gradient difference
+        state["sy_history"] = [(torch.zeros(d), torch.zeros(d)) for _ in range(m)]
+
+    def _get_grad_vector(self) -> Tensor:
+        """Concatenates gradients from all parameters into a 1D tensor"""
+        grads = []
+        for param in self._params:
+            if param.grad is None:
+                grads.append(torch.zeros_like(param.data))
+            else:
+                grads.append(param.grad)
+        return torch.cat(grads)
+
+    def _get_param_vector(self) -> Tensor:
+        """Concatenates all parameters into a 1D tensor"""
+        return torch.cat([p.data.view(-1) for p in self._params])
+
+    def _set_param_vector(self, vec: Tensor):
+        """Set model parameters to the given tensor"""
+        offset = 0
+        for param in self._params:
+            numel = param.numel()
+            param.data.copy_(vec[offset : offset + numel].view_as(param))
+            offset += numel
+
+    def _two_loop_recursion(self, grad: Tensor) -> Tensor:
+        group = self.param_groups[0]
+        state = self.state[self._params[0]]
+        m = group["history_size"]
+        k = state["num_iters"]
+        sy_history = state["sy_history"]
+        s_prev, y_prev = sy_history[(k - 1) % m]
+
+        q = grad.clone()
+        alphas = torch.zeros(m)
+        const = 0
+        for i in range(k - 1, max(k - m, 0) - 1, -1):
+            s_prev, y_prev = sy_history[i % m]
+            alphas[i - (k - m)] = s_prev.dot(q) / s_prev.dot(y_prev)
+            q -= alphas[i - (k - m)] * y_prev
+
+            const += s_prev.dot(y_prev) / y_prev.dot(y_prev)
+        r = const / min(k, m) * q
+        for i in range(max(k - m, 0), k):
+            s_prev, y_prev = sy_history[i % m]
+            beta = y_prev.dot(r) / s_prev.dot(y_prev)
+            r += (alphas[i - (k - m)] - beta) * s_prev
+        return r
+
+    @torch.no_grad()
+    def step(self, closure: Callable[[], float]) -> float:
+        """
+        Perform a single oL-BFGS iteration.
+
+        Parameters:
+            closure: A closure that re-evaluates the model and returns the loss.
+        """
+        # Make sure the closure is always called with grad enabled
+        closure = torch.enable_grad()(closure)
+
+        group = self.param_groups[0]
+        state = self.state[self._params[0]]
+        # lr = group["lr"]
+        m = group["history_size"]
+        grad_tol = group["grad_tol"]
+        eps = group["eps"]
+        eta0 = group["eta0"]
+        tau = group["tau"]
+        c = group["c"]
+        k = state["num_iters"]
+        sy_history = state["sy_history"]
+
+        orig_loss = closure()  # Populate gradients
+        x_k = self._get_param_vector()
+        grad = self._get_grad_vector()
+        # TODO: replace this with a more robust criterion
+        if grad.norm() < grad_tol:
+            return orig_loss
+
+        if k == 0:
+            p_k = -grad * eps
+        else:
+            p_k = -self._two_loop_recursion(grad)
+            if grad.dot(p_k) >= 0:
+                logger.warning("p_k may not be a descent direction.")
+
+        alpha_k = tau * eta0 / (tau + k)
+        x_k_next = x_k + (alpha_k / c) * p_k
+        self._set_param_vector(x_k_next)
+        closure()
+        grad_next = self._get_grad_vector()
+        sy_history[k % m] = (x_k_next - x_k, grad_next - grad)
+
+        state["num_iters"] += 1
+        return orig_loss
