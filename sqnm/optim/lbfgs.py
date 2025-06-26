@@ -38,8 +38,6 @@ class LBFGS(SQNBase):
         """
         if lr <= 0:
             raise ValueError("LBFGS learning rate must be positive")
-        if history_size < 1:
-            raise ValueError("LBFGS history size must be positive")
         if line_search_fn is not None and line_search_fn != "strong_wolfe":
             raise ValueError("LBFGS only supports strong Wolfe line search")
 

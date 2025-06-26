@@ -16,6 +16,8 @@ class SQNBase(Optimizer):
     def __init__(self, params: ParamsT, defaults: dict[str, Any]):
         if not defaults.get("history_size"):
             raise ValueError("L-BFGS type optimizers must have a history size")
+        if defaults["history_size"] < 1:
+            raise ValueError("History size must be positive")
 
         super().__init__(params, defaults)
 

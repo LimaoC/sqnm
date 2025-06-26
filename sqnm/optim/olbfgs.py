@@ -28,11 +28,8 @@ class OLBFGS(SQNBase):
         c: float = 0.1,
     ):
         """
-        Online limited-memory BFGS
+        Online limited-memory BFGS (oL-BFGS)
         """
-        if history_size < 1:
-            raise ValueError("oL-BFGS history size must be positive")
-
         defaults = dict(
             history_size=history_size,
             grad_tol=grad_tol,
