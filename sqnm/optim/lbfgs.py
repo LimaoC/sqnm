@@ -1,29 +1,33 @@
+"""
+Limited-memory BFGS (L-BFGS)
+"""
+
 import logging
 from typing import Callable
 
 import torch
 from torch import Tensor
-from torch.optim import Optimizer
-from torch.optim.optimizer import ParamsT
 
 from ..utils.line_search import strong_wolfe
+from .sqn_base import SQNBase
 
 logger = logging.getLogger(__name__)
 
 
-class LBFGS(Optimizer):
+class LBFGS(SQNBase):
     def __init__(
         self,
-        params: ParamsT,
+        params,
         lr: float = 1,
         history_size: int = 20,
         grad_tol: float = 1e-4,
         line_search_fn: str | None = None,
     ):
         """
-        Limited-memory BFGS Algorithm
+        Limited-memory BFGS (L-BFGS)
 
         Parameters:
+            params: iterable of parameters to optimize
             lr: learning rate, only used if line_search_fn = None
             history_size: history size, usually 2 <= m <= 30
             grad_tol: termination tolerance for gradient norm
@@ -46,64 +50,6 @@ class LBFGS(Optimizer):
             line_search_fn=line_search_fn,
         )
         super().__init__(params, defaults)
-
-        if len(self.param_groups) != 1:
-            raise ValueError("LBFGS doesn't support per-parameter options")
-
-        self._params: list[torch.nn.Parameter] = self.param_groups[0]["params"]
-
-        d = self._get_param_vector().shape[0]
-        m = history_size
-        # Store LBFGS state in first param
-        state = self.state[self._params[0]]
-        state["num_iters"] = 0
-        # Store the m previous (s, y) pairs
-        # s is the iterate difference, y is the gradient difference
-        state["sy_history"] = [(torch.zeros(d), torch.zeros(d)) for _ in range(m)]
-
-    def _get_grad_vector(self) -> Tensor:
-        """Concatenates gradients from all parameters into a 1D tensor"""
-        grads = []
-        for param in self._params:
-            if param.grad is None:
-                grads.append(torch.zeros_like(param.data))
-            else:
-                grads.append(param.grad)
-        return torch.cat(grads)
-
-    def _get_param_vector(self) -> Tensor:
-        """Concatenates all parameters into a 1D tensor"""
-        return torch.cat([p.data.view(-1) for p in self._params])
-
-    def _set_param_vector(self, vec: Tensor):
-        """Set model parameters to the given tensor"""
-        offset = 0
-        for param in self._params:
-            numel = param.numel()
-            param.data.copy_(vec[offset : offset + numel].view_as(param))
-            offset += numel
-
-    def _two_loop_recursion(self, grad: Tensor) -> Tensor:
-        """REF: Algorithm 7.4 in Numerical Optimization by Nocedal and Wright"""
-        group = self.param_groups[0]
-        state = self.state[self._params[0]]
-        m = group["history_size"]
-        k = state["num_iters"]
-        sy_history = state["sy_history"]
-        s_prev, y_prev = sy_history[(k - 1) % m]
-
-        q = grad.clone()
-        alphas = torch.zeros(m)
-        for i in range(k - 1, max(k - m, 0) - 1, -1):
-            s_prev, y_prev = sy_history[i % m]
-            alphas[i - (k - m)] = s_prev.dot(q) / s_prev.dot(y_prev)
-            q -= alphas[i - (k - m)] * y_prev
-        r = (s_prev.dot(y_prev) / y_prev.dot(y_prev)) * q
-        for i in range(max(k - m, 0), k):
-            s_prev, y_prev = sy_history[i % m]
-            beta = y_prev.dot(r) / s_prev.dot(y_prev)
-            r += (alphas[i - (k - m)] - beta) * s_prev
-        return r
 
     @torch.no_grad()
     def step(self, closure: Callable[[], float]) -> float:  # type: ignore[override]
