@@ -1,5 +1,5 @@
 """
-Online limited-memory BFGS algorithm
+Online limited-memory BFGS (oL-BFGS)
 
 REF: Schraudolph, N. N., Yu, J., & Günter, S. (2007). A Stochastic Quasi-Newton Method
     for Online Convex Optimization.
@@ -10,16 +10,16 @@ from typing import Callable
 
 import torch
 from torch import Tensor
-from torch.optim import Optimizer
-from torch.optim.optimizer import ParamsT
+
+from .sqn_base import SQNBase
 
 logger = logging.getLogger(__name__)
 
 
-class OLBFGS(Optimizer):
+class OLBFGS(SQNBase):
     def __init__(
         self,
-        params: ParamsT,
+        params,
         history_size: int = 20,
         grad_tol: float = 1e-4,
         eps: float = 1e-10,
@@ -28,10 +28,10 @@ class OLBFGS(Optimizer):
         c: float = 0.1,
     ):
         """
-        Online limited-memory BFGS algorithm
+        Online limited-memory BFGS
         """
         if history_size < 1:
-            raise ValueError("oLBFGS history size must be positive")
+            raise ValueError("oL-BFGS history size must be positive")
 
         defaults = dict(
             history_size=history_size,
@@ -43,43 +43,14 @@ class OLBFGS(Optimizer):
         )
         super().__init__(params, defaults)
 
-        if len(self.param_groups) != 1:
-            raise ValueError("LBFGS doesn't support per-parameter options")
-
-        self._params: list[torch.nn.Parameter] = self.param_groups[0]["params"]
-
-        d = self._get_param_vector().shape[0]
-        m = history_size
-        # Store LBFGS state in first param
-        state = self.state[self._params[0]]
-        state["num_iters"] = 0
-        # Store the m previous (s, y) pairs
-        # s is the iterate difference, y is the gradient difference
-        state["sy_history"] = [(torch.zeros(d), torch.zeros(d)) for _ in range(m)]
-
-    def _get_grad_vector(self) -> Tensor:
-        """Concatenates gradients from all parameters into a 1D tensor"""
-        grads = []
-        for param in self._params:
-            if param.grad is None:
-                grads.append(torch.zeros_like(param.data))
-            else:
-                grads.append(param.grad)
-        return torch.cat(grads)
-
-    def _get_param_vector(self) -> Tensor:
-        """Concatenates all parameters into a 1D tensor"""
-        return torch.cat([p.data.view(-1) for p in self._params])
-
-    def _set_param_vector(self, vec: Tensor):
-        """Set model parameters to the given tensor"""
-        offset = 0
-        for param in self._params:
-            numel = param.numel()
-            param.data.copy_(vec[offset : offset + numel].view_as(param))
-            offset += numel
-
     def _two_loop_recursion(self, grad: Tensor) -> Tensor:
+        """
+        Two loop recursion for computing H_k * grad
+
+        H_k^0 is computed from the (s, y) pairs from the (up to) history_size most
+        recent iterates, as opposed to just using the most recent (s, y) pair in the
+        standard L-BFGS two loop recursion.
+        """
         group = self.param_groups[0]
         state = self.state[self._params[0]]
         m = group["history_size"]
@@ -104,7 +75,7 @@ class OLBFGS(Optimizer):
         return r
 
     @torch.no_grad()
-    def step(self, closure: Callable[[], float]) -> float:
+    def step(self, closure: Callable[[], float]) -> float:  # type: ignore[override]
         """
         Perform a single oL-BFGS iteration.
 
@@ -116,7 +87,6 @@ class OLBFGS(Optimizer):
 
         group = self.param_groups[0]
         state = self.state[self._params[0]]
-        # lr = group["lr"]
         m = group["history_size"]
         grad_tol = group["grad_tol"]
         eps = group["eps"]
