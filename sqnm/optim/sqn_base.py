@@ -77,7 +77,8 @@ class SQNBase(Optimizer):
             s_prev, y_prev = sy_history[i % m]
             if torch.all(s_prev == 0) or torch.all(y_prev == 0):
                 logger.warning(
-                    "Found a (s, y) pair that is all zero - this is likely an error"
+                    f"Found a (s, y) pair at index {i} that is zero - "
+                    "this is likely an error"
                 )
 
     def _two_loop_recursion(self, grad: Tensor) -> Tensor:
