@@ -94,25 +94,25 @@ class OLBFGS(SQNBase):
         sy_history = state["sy_history"]
 
         orig_loss = closure()  # Populate gradients
-        x_k = self._get_param_vector()
+        xk = self._get_param_vector()
         grad = self._get_grad_vector()
         # TODO: replace this with a more robust criterion
         if grad.norm() < grad_tol:
             return orig_loss
 
         if k == 0:
-            p_k = -grad * eps
+            pk = -grad * eps
         else:
-            p_k = -self._two_loop_recursion(grad)
-            if grad.dot(p_k) >= 0:
+            pk = -self._two_loop_recursion(grad)
+            if grad.dot(pk) >= 0:
                 logger.warning("p_k may not be a descent direction.")
 
         alpha_k = tau * eta0 / (tau + k)
-        x_k_next = x_k + (alpha_k / c) * p_k
-        self._set_param_vector(x_k_next)
+        xk_next = xk + (alpha_k / c) * pk
+        self._set_param_vector(xk_next)
         closure()
         grad_next = self._get_grad_vector()
-        sy_history[k % m] = (x_k_next - x_k, grad_next - grad)
+        sy_history[k % m] = (xk_next - xk, grad_next - grad)
 
         state["num_iters"] += 1
         return orig_loss

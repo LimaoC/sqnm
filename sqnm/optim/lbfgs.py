@@ -70,16 +70,16 @@ class LBFGS(SQNBase):
         sy_history = state["sy_history"]
 
         orig_loss = closure()  # Populate gradients
-        x_k = self._get_param_vector()
+        xk = self._get_param_vector()
         grad = self._get_grad_vector()
         if grad.norm() < grad_tol:
             return orig_loss
 
         if k == 0:
-            p_k = -grad  # Gradient descent for first iteration
+            pk = -grad  # Gradient descent for first iteration
         else:
-            p_k = -self._two_loop_recursion(grad)
-            if grad.dot(p_k) >= 0:
+            pk = -self._two_loop_recursion(grad)
+            if grad.dot(pk) >= 0:
                 logger.warning("p_k is not a descent direction.")
 
         def f(x: Tensor) -> float:
@@ -96,14 +96,14 @@ class LBFGS(SQNBase):
 
         if line_search_fn is not None:
             # Choose step size to satisfy strong Wolfe conditions
-            alpha_k = strong_wolfe(f, grad_f, x_k, p_k)
-            x_k_next = x_k + alpha_k * p_k
+            alpha_k = strong_wolfe(f, grad_f, xk, pk)
+            xk_next = xk + alpha_k * pk
         else:
             # Use fixed step size
-            x_k_next = x_k + lr * p_k
+            xk_next = xk + lr * pk
         # Compute and store next iterates
-        grad_next = grad_f(x_k_next)
-        sy_history[k % m] = (x_k_next - x_k, grad_next - grad)
+        grad_next = grad_f(xk_next)
+        sy_history[k % m] = (xk_next - xk, grad_next - grad)
 
         state["num_iters"] += 1
         return orig_loss

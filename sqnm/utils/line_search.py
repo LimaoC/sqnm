@@ -11,8 +11,8 @@ logger = logging.getLogger(__name__)
 def strong_wolfe(
     f: Callable[[Tensor], float],
     grad_f: Callable[[Tensor], Tensor],
-    x_k: Tensor,
-    p_k: Tensor,
+    xk: Tensor,
+    pk: Tensor,
     a0: float = 1,
     a_max: float = 100,
     c1: float = 1e-4,
@@ -26,8 +26,8 @@ def strong_wolfe(
     Parameters:
         f: objective function, assumed to be bounded below along the direction p_k
         grad_f: gradient of objective function
-        x_k: current iterate
-        p_k: direction, assumed to be a descent direction
+        xk: current iterate
+        pk: direction, assumed to be a descent direction
         a0: initial step size (1 should always be used as the initial step size for
             Newton and quasi-Newton methods)
         a_max: maximum step size
@@ -41,11 +41,11 @@ def strong_wolfe(
 
     @cache
     def phi(a_k: float) -> float:
-        return f(x_k + a_k * p_k)
+        return f(xk + a_k * pk)
 
     @cache
     def grad_phi(a_k: float) -> float:
-        return grad_f(x_k + a_k * p_k).dot(p_k).item()
+        return grad_f(xk + a_k * pk).dot(pk).item()
 
     def zoom(a_lo: float, a_hi: float) -> float:
         """REF: Algorithm 3.6 in Numerical Optimization by Nocedal and Wright"""
