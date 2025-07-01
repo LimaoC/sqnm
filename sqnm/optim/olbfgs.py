@@ -79,9 +79,7 @@ class OLBFGS(SQNBase):
         Parameters:
             closure: A closure that re-evaluates the model and returns the loss.
         """
-        # Make sure the closure is always called with grad enabled
-        closure = torch.enable_grad()(closure)
-
+        # Get state and hyperparameter variables
         group = self.param_groups[0]
         state = self.state[self._params[0]]
         m = group["history_size"]
@@ -93,24 +91,30 @@ class OLBFGS(SQNBase):
         k = state["num_iters"]
         sy_history = state["sy_history"]
 
+        ################################################################################
+
+        # Make sure the closure is always called with grad enabled
+        closure = torch.enable_grad()(closure)
+
         orig_loss = closure()  # Populate gradients
         xk = self._get_param_vector()
         grad = self._get_grad_vector()
-        # TODO: replace this with a more robust criterion
+        # TODO: Replace this with a more robust criterion, stochastic gradient is noisy
         if grad.norm() < grad_tol:
             return orig_loss
 
         if k == 0:
             pk = -grad * eps
         else:
+            # NOTE: Is it possible to check if pk is a descent direction here?
+            # NOTE: Stochastic gradient isn't reliable
             pk = -self._two_loop_recursion(grad)
-            if grad.dot(pk) >= 0:
-                logger.warning("p_k may not be a descent direction.")
 
+        # TODO: Replace this with a more robust step size
         alpha_k = tau * eta0 / (tau + k)
         xk_next = xk + (alpha_k / c) * pk
         self._set_param_vector(xk_next)
-        closure()
+        closure()  # Populate gradient of xk_next
         grad_next = self._get_grad_vector()
         sy_history[k % m] = (xk_next - xk, grad_next - grad)
 

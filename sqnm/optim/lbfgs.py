@@ -1,5 +1,7 @@
 """
 Limited-memory BFGS (L-BFGS)
+
+REF: Algorithm 7.5 in Numerical Optimization by Nocedal and Wright
 """
 
 import logging
@@ -33,8 +35,6 @@ class LBFGS(SQNBase):
             grad_tol: termination tolerance for gradient norm
             line_search_fn: line search function to use, either None for fixed step
                 size, or "strong_wolfe" for strong Wolfe line search
-
-        REF: Algorithm 7.5 in Numerical Optimization by Nocedal and Wright
         """
         if lr <= 0:
             raise ValueError("LBFGS learning rate must be positive")
@@ -57,9 +57,7 @@ class LBFGS(SQNBase):
         Parameters:
             closure: A closure that re-evaluates the model and returns the loss.
         """
-        # Make sure the closure is always called with grad enabled
-        closure = torch.enable_grad()(closure)
-
+        # Get state and hyperparameter variables
         group = self.param_groups[0]
         state = self.state[self._params[0]]
         lr = group["lr"]
@@ -68,6 +66,23 @@ class LBFGS(SQNBase):
         line_search_fn = group["line_search_fn"]
         k = state["num_iters"]
         sy_history = state["sy_history"]
+
+        ################################################################################
+
+        def f(x: Tensor) -> float:
+            """Objective function - also sets param vector to x"""
+            self._set_param_vector(x)
+            loss = closure()
+            return loss
+
+        def grad_f(x: Tensor) -> Tensor:
+            """Gradient function - also sets param vector to x"""
+            self._set_param_vector(x)
+            closure()  # Recompute gradient after setting new param
+            return self._get_grad_vector()
+
+        # Make sure the closure is always called with grad enabled
+        closure = torch.enable_grad()(closure)
 
         orig_loss = closure()  # Populate gradients
         xk = self._get_param_vector()
@@ -81,18 +96,6 @@ class LBFGS(SQNBase):
             pk = -self._two_loop_recursion(grad)
             if grad.dot(pk) >= 0:
                 logger.warning("p_k is not a descent direction.")
-
-        def f(x: Tensor) -> float:
-            """Objective function - also sets param vector to x"""
-            self._set_param_vector(x)
-            loss = closure()
-            return loss
-
-        def grad_f(x: Tensor) -> Tensor:
-            """Gradient function - also sets param vector to x"""
-            self._set_param_vector(x)
-            closure()  # Recompute gradient after setting new param
-            return self._get_grad_vector()
 
         if line_search_fn is not None:
             # Choose step size to satisfy strong Wolfe conditions
