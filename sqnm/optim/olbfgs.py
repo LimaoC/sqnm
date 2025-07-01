@@ -44,28 +44,30 @@ class OLBFGS(SQNBase):
         """
         Two loop recursion for computing H_k * grad
 
-        H_k^0 is computed from the (s, y) pairs from the (up to) history_size most
-        recent iterates, as opposed to just using the most recent (s, y) pair in the
-        standard L-BFGS two loop recursion.
+        This differs from the standard two loop recursion in that H_k^(0) is computed
+        from the (s, y) pairs from the (up to) history_size most recent iterates,
+        instead of just the most recent (s, y) pair.
         """
         group = self.param_groups[0]
         state = self.state[self._params[0]]
         m = group["history_size"]
         k = state["num_iters"]
         sy_history = state["sy_history"]
-        s_prev, y_prev = sy_history[(k - 1) % m]
+
+        self._two_loop_recursion_check_curvature_pairs()
 
         q = grad.clone()
         alphas = torch.zeros(m)
+        s_prev, y_prev = sy_history[(k - 1) % m]
+        history_idxs = range(max(k - m, 0), k)
         const = 0
-        for i in range(k - 1, max(k - m, 0) - 1, -1):
+        for i in reversed(history_idxs):
             s_prev, y_prev = sy_history[i % m]
             alphas[i - (k - m)] = s_prev.dot(q) / s_prev.dot(y_prev)
             q -= alphas[i - (k - m)] * y_prev
-
             const += s_prev.dot(y_prev) / y_prev.dot(y_prev)
         r = const / min(k, m) * q
-        for i in range(max(k - m, 0), k):
+        for i in history_idxs:
             s_prev, y_prev = sy_history[i % m]
             beta = y_prev.dot(r) / s_prev.dot(y_prev)
             r += (alphas[i - (k - m)] - beta) * s_prev
