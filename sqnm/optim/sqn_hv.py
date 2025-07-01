@@ -38,19 +38,43 @@ class SQNHv(SQNBase):
 
         state = self.state[self._params[0]]
         state["num_iters"] = 1  # Algorithm in paper starts from k = 1
-        state["num_curvature_pairs"] = -1
+        state["num_curvature_iters"] = -1
         state["xt_avgs"] = [torch.zeros_like(self._get_param_vector())]
+
+    def _two_loop_recursion_check_curvature_pairs(self):
+        """
+        Check that we're accessing the correct (s, y) pairs when computing the two loop
+        recursion - they should all be non-zero vectors
+        """
+        group = self.param_groups[0]
+        state = self.state[self._params[0]]
+        m = group["history_size"]
+        # The paper's t index is off by 1 compared to the convention
+        # They define s_t = x_t - x_{t-1} instead of s_{t-1} = x_t - x_{t-1}
+        # Account for this here
+        t = state["num_curvature_iters"] - 1
+        sy_history = state["sy_history"]
+
+        for i in range(max(t - m, 0), t):
+            s_prev, y_prev = sy_history[i % m]
+            if torch.all(s_prev == 0) or torch.all(y_prev == 0):
+                logger.warning(
+                    f"Found a (s, y) pair at index {i} that is zero - "
+                    "this is likely an error"
+                )
 
     def _two_loop_recursion(self, grad: Tensor) -> Tensor:
         """
         Two loop recursion for computing H_k * grad
 
-        REF: Algorithm 7.4 in Numerical Optimization by Nocedal and Wright
+        This differs from the standard two loop recursion in that the (s, y) pairs are
+        indexed by t not k (as the curvature pair computations are decoupled from the
+        stochastic gradient computations).
         """
         group = self.param_groups[0]
         state = self.state[self._params[0]]
         m = group["history_size"]
-        t = state["num_curvature_pairs"] - 1
+        t = state["num_curvature_iters"] - 1
         sy_history = state["sy_history"]
 
         self._two_loop_recursion_check_curvature_pairs()
@@ -58,12 +82,13 @@ class SQNHv(SQNBase):
         q = grad.clone()
         alphas = torch.zeros(m)
         s_prev, y_prev = sy_history[t % m]
-        for i in range(t - 1, max(t - m, 0) - 1, -1):
+        history_idxs = range(max(t - m, 0), t)
+        for i in reversed(history_idxs):
             s_prev, y_prev = sy_history[i % m]
             alphas[i - (t - m)] = s_prev.dot(q) / s_prev.dot(y_prev)
             q -= alphas[i - (t - m)] * y_prev
         r = (s_prev.dot(y_prev) / y_prev.dot(y_prev)) * q
-        for i in range(max(t - m, 0), t):
+        for i in history_idxs:
             s_prev, y_prev = sy_history[i % m]
             beta = y_prev.dot(r) / s_prev.dot(y_prev)
             r += (alphas[i - (t - m)] - beta) * s_prev
@@ -121,14 +146,15 @@ class SQNHv(SQNBase):
 
         if k % skip == 0:
             # Compute curvature pairs every L iterations
-            state["num_curvature_pairs"] += 1
-            t = state["num_curvature_pairs"]
-            curvature_f = torch.enable_grad()(curv_f)
+            state["num_curvature_iters"] += 1
+            t = state["num_curvature_iters"]
+            curv_f = torch.enable_grad()(curv_f)
             xt_avgs[-1] /= skip
             if t > 0:
                 st = xt_avgs[-1] - xt_avgs[-2]
-                yt = hvp(curvature_f, self._get_param_vector(), v=st, strict=True)[1]
-                # print(st, yt)
+                # Compute subsampled Hessian vector product on a different, larger
+                # sample given by curv_f
+                yt = hvp(curv_f, self._get_param_vector(), v=st, strict=True)[1]
                 sy_history[(t - 1) % m] = (st, yt)
             xt_avgs.append(torch.zeros_like(self._get_param_vector()))
 
