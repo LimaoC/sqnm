@@ -45,9 +45,9 @@ class SQNBase(Optimizer):
         grads = []
         for param in self._params:
             if param.grad is None:
-                grads.append(torch.zeros_like(param.data))
+                grads.append(torch.zeros_like(param.data).view(-1))
             else:
-                grads.append(param.grad)
+                grads.append(param.grad.view(-1))
         return torch.cat(grads)
 
     def _get_param_vector(self) -> Tensor:
