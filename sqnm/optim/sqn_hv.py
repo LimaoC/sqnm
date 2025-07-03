@@ -95,7 +95,7 @@ class SQNHv(SQNBase):
         return r
 
     @torch.no_grad()
-    def step(
+    def step(  # type: ignore[override]
         self,
         closure: Callable[[], float],
         curv_f: Callable[[Tensor], Tensor] | None = None,
@@ -148,7 +148,6 @@ class SQNHv(SQNBase):
             # Compute curvature pairs every L iterations
             state["num_curvature_iters"] += 1
             t = state["num_curvature_iters"]
-            curv_f = torch.enable_grad()(curv_f)
             xt_avgs[-1] /= skip
             if t > 0:
                 st = xt_avgs[-1] - xt_avgs[-2]
