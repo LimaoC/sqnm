@@ -153,7 +153,7 @@ class SQNHv(SQNBase):
                 st = xt_avgs[-1] - xt_avgs[-2]
                 # Compute subsampled Hessian vector product on a different, larger
                 # sample given by curv_f
-                yt = hvp(curv_f, self._get_param_vector(), v=st, strict=True)[1]
+                yt = hvp(curv_f, xt_avgs[-1], v=st, strict=True)[1]
                 sy_history[(t - 1) % m] = (st, yt)
             xt_avgs.append(torch.zeros_like(self._get_param_vector()))
 
