@@ -22,6 +22,7 @@ class OLBFGS(SQNBase):
         params,
         history_size: int = 20,
         grad_tol: float = 1e-4,
+        l: float = 0,
         eps: float = 1e-10,
         eta0: float = 0.1 * 100 / (100 + 2),
         tau: float = 2 * 10**4,
@@ -33,6 +34,7 @@ class OLBFGS(SQNBase):
         defaults = dict(
             history_size=history_size,
             grad_tol=grad_tol,
+            l=l,
             eps=eps,
             eta0=eta0,
             tau=tau,
@@ -86,6 +88,7 @@ class OLBFGS(SQNBase):
         state = self.state[self._params[0]]
         m = group["history_size"]
         grad_tol = group["grad_tol"]
+        l = group["l"]
         eps = group["eps"]
         eta0 = group["eta0"]
         tau = group["tau"]
@@ -118,7 +121,7 @@ class OLBFGS(SQNBase):
         self._set_param_vector(xk_next)
         closure()  # Populate gradient of xk_next
         grad_next = self._get_grad_vector()
-        sy_history[k % m] = (xk_next - xk, grad_next - grad)
+        sy_history[k % m] = (xk_next - xk, grad_next - grad + l * (xk_next - xk))
 
         state["num_iters"] += 1
         return orig_loss
