@@ -39,7 +39,7 @@ class SQNHv(SQNBase):
         state = self.state[self._params[0]]
         state["num_iters"] = 1  # Algorithm in paper starts from k = 1
         state["num_curvature_iters"] = -1
-        state["xt_avgs"] = [torch.zeros_like(self._get_param_vector())]
+        state["xt"] = [torch.zeros_like(self._get_param_vector())]
 
     def _two_loop_recursion_check_curvature_pairs(self):
         """
@@ -109,7 +109,8 @@ class SQNHv(SQNBase):
         beta = group["beta"]
         k = state["num_iters"]
         sy_history = state["sy_history"]
-        xt_avgs = state["xt_avgs"]
+        # Note the different index t; curvature estimates are decoupled from gradient estimates
+        xt = state["xt"]
 
         ################################################################################
 
@@ -129,7 +130,7 @@ class SQNHv(SQNBase):
             return orig_loss
 
         # Accumulate average over L iterations
-        xt_avgs[-1] += xk
+        xt[-1] += xk
 
         if k <= 2 * skip:
             # Stochastic gradient descent for first 2L iterations
@@ -148,14 +149,14 @@ class SQNHv(SQNBase):
             # Compute curvature pairs every L iterations
             state["num_curvature_iters"] += 1
             t = state["num_curvature_iters"]
-            xt_avgs[-1] /= skip
+            xt[-1] /= skip
             if t > 0:
-                st = xt_avgs[-1] - xt_avgs[-2]
+                st = xt[-1] - xt[-2]
                 # Compute subsampled Hessian vector product on a different, larger
                 # sample given by curv_f
-                yt = hvp(curv_f, xt_avgs[-1], v=st, strict=True)[1]
+                yt = hvp(curv_f, xt[-1], v=st, strict=True)[1]
                 sy_history[(t - 1) % m] = (st, yt)
-            xt_avgs.append(torch.zeros_like(self._get_param_vector()))
+            xt.append(torch.zeros_like(self._get_param_vector()))
 
         state["num_iters"] += 1
         return orig_loss
