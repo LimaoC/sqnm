@@ -10,7 +10,7 @@ from typing import Callable
 import torch
 from torch import Tensor
 
-from ..utils.line_search import strong_wolfe
+from ..utils.line_search import strong_wolfe_line_search
 from .sqn_base import SQNBase
 
 logger = logging.getLogger(__name__)
@@ -99,7 +99,7 @@ class LBFGS(SQNBase):
 
         if line_search_fn is not None:
             # Choose step size to satisfy strong Wolfe conditions
-            alpha_k = strong_wolfe(f, grad_f, xk, pk)
+            alpha_k = strong_wolfe_line_search(f, grad_f, xk, pk)
             xk_next = xk + alpha_k * pk
         else:
             # Use fixed step size

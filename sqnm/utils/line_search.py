@@ -8,7 +8,7 @@ from torch import Tensor
 logger = logging.getLogger(__name__)
 
 
-def strong_wolfe(
+def strong_wolfe_line_search(
     f: Callable[[Tensor], float],
     grad_f: Callable[[Tensor], Tensor],
     xk: Tensor,
