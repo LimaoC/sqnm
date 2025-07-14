@@ -50,10 +50,16 @@ def strong_wolfe_line_search(
     def zoom(a_lo: float, a_hi: float) -> float:
         """REF: Algorithm 3.6 in Numerical Optimization by Nocedal and Wright"""
 
+        # Maintain three conditions in each iteration:
+        # (a) The interval (a_lo, a_hi) contains step lengths that satisfy strong Wolfe
+        # (b) a_lo gives the smallest function value among all step lengths generated so
+        #     far that satisfy the sufficient decrease condition
+        # (c) a_hi is chosen s.t. grad_phi(a_lo) * (a_hi - a_lo) < 0
+
         z_iters = 0
         while z_iters < zoom_max_iters:
             z_iters += 1
-            # Interpolate to find a trial step size a_j in [a_lo, a_hi]
+            # Interpolate to find a trial step size a_j in (a_lo, a_hi)
             a_j = _cubic_interp(
                 a_lo,
                 a_hi,
@@ -67,14 +73,19 @@ def strong_wolfe_line_search(
                 a_j = (a_lo + a_hi) / 2
 
             # Armijo/sufficient decrease condition
-            if (phi(a_j) > phi(0) + c1 * a_j * grad_phi(0)) or phi(a_j) >= phi(a_lo):
+            armijo_cond = phi(a_j) <= phi(0) + c1 * a_j * grad_phi(0)
+            if not armijo_cond or (phi(a_j) >= phi(a_lo)):
+                # Narrow search to (a_lo, a_j)
                 a_hi = a_j
             else:
-                # Curvature condition
+                # (Modified) curvature condition
                 if np.abs(grad_phi(a_j)) <= -c2 * grad_phi(0):
+                    # a_j satisfies strong Wolfe conditions, stop here
                     break
+                # Maintain condition (c)
                 if grad_phi(a_j) * (a_hi - a_lo) >= 0:
                     a_hi = a_lo
+                # Maintain condition (b)
                 a_lo = a_j
 
         if z_iters == zoom_max_iters:
@@ -93,20 +104,24 @@ def strong_wolfe_line_search(
     iters = 1
     while iters < max_iters:
         # Armijo/sufficient decrease condition
-        armijo_cond = phi(a_curr) > phi(0) + c1 * a_curr * grad_phi(0)
-        if armijo_cond or (phi(a_curr) >= phi_prev and iters > 1):
+        armijo_cond = phi(a_curr) <= phi(0) + c1 * a_curr * grad_phi(0)
+        if not armijo_cond or (phi(a_curr) >= phi_prev and iters > 1):
+            # (a_prev, a_curr) contains step lengths satisfying strong Wolfe conditions
             a_star = zoom(a_prev, a_curr)
             break
 
-        # Curvature condition
+        # (Modified) curvature condition
         if np.abs(grad_phi(a_curr)) <= -c2 * grad_phi(0):
+            # a_curr satisfies strong Wolfe conditions, stop here
             a_star = a_curr
             break
 
         if grad_phi(a_curr) >= 0:
+            # (a_prev, a_curr) contains step lengths satisfying strong Wolfe conditions
             a_star = zoom(a_curr, a_prev)
             break
 
+        # Extrapolate to find next trial value (doubling strategy)
         a_prev, a_curr = a_curr, min(a_curr * 2, a_max)
         phi_prev = phi(a_prev)
         iters += 1
