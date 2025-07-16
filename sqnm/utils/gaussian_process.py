@@ -24,8 +24,8 @@ class ProbLSGaussianProcess:
         self.ts = []
         self.ys = []
         self.dys = []
-        self.var_fs = []
-        self.var_dfs = []
+        # self.var_fs = []
+        # self.var_dfs = []
 
         self.K = None
         self.Kd = None
@@ -39,8 +39,8 @@ class ProbLSGaussianProcess:
         self.ts.append(t)
         self.ys.append(y)
         self.dys.append(dy)
-        self.var_fs.append(var_f)
-        self.var_dfs.append(var_df)
+        # self.var_fs.append(var_f)
+        # self.var_dfs.append(var_df)
 
     def update(self):
         self.K = torch.zeros((self.N, self.N))

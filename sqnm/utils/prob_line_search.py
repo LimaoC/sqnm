@@ -71,29 +71,23 @@ def prob_line_search(
     gp.update()
 
     while gp.N < L + 1:
-        y, dy, var_f, var_df = _evaluate_objective(f, f0, tt, x0, a0, dir, beta)
-        gp.add(tt, y, dy, var_f, var_df)
+        y, dy = _evaluate_objective(f, f0, tt, x0, a0, dir, beta)
+        gp.add(tt, y, dy)
         gp.update()
 
-        if _prob_wolfe(tt, df0, gp) > wolfe_threshold:
-            return _rescale_output(
-                x0, f0, a0, dir, tt, y, dy, var_f, var_df, beta, a_stats
-            )
+        if _prob_wolfe(tt, gp) > wolfe_threshold:
+            return _rescale_output(x0, f0, a0, dir, tt, y, dy, beta, a_stats)
 
         ms = [gp.mu(t) for t in gp.ts]
         dms = [gp.d1mu(t) for t in gp.ts]
 
         min_m_idx = np.argmin(ms)
-        t_min, dm_min = gp.ts[min_m_idx], dms[min_m_idx]
+        m_min, t_min, dm_min = ms[min_m_idx], gp.ts[min_m_idx], dms[min_m_idx]
 
         if torch.abs(dm_min) < 1e-5 and gp.Vd(t_min) < 1e-4:  # nearly deterministic
             y = gp.ys[min_m_idx]
             dy = gp.dys[min_m_idx]
-            var_f = gp.var_fs[min_m_idx]
-            var_df = gp.var_dfs[min_m_idx]
-            return _rescale_output(
-                x0, f0, a0, dir, t_min, y, dy, var_f, var_df, beta, a_stats
-            )
+            return _rescale_output(x0, f0, a0, dir, t_min, y, dy, beta, a_stats)
 
         ts_sorted = sorted(gp.ts)
         ts_cand = []
@@ -116,32 +110,28 @@ def prob_line_search(
             else:
                 if n == 0 and gp.d1mu(0) > 0:
                     t_cand = 0.01 * (ts_sorted[n] + ts_sorted[n + 1])
-                    y, dy, var_f, var_df = _evaluate_objective(
-                        f, f0, t_cand, x0, a0, dir, beta
-                    )
+                    y, dy = _evaluate_objective(f, f0, t_cand, x0, a0, dir, beta)
                     return _rescale_output(
-                        x0, f0, a0, dir, t_cand, y, dy, var_f, var_df, beta, a_stats
+                        x0, f0, a0, dir, t_cand, y, dy, beta, a_stats
                     )
 
-            if n > 0 and _prob_wolfe(ts_sorted[n], df0, gp) > wolfe_threshold:
+            if n > 0 and _prob_wolfe(ts_sorted[n], gp) > wolfe_threshold:
                 ts_wolfe.append(ts_sorted[n])
 
         if len(ts_wolfe) > 0:
             ms_wolfe = [gp.mu(t) for t in ts_wolfe]
             min_m_idx = np.argmin(ms_wolfe)
-            t_min = gp.ts[min_m_idx]
-            y, dy, var_f, var_df = _evaluate_objective(f, f0, t_min, x0, a0, dir, beta)
-            return _rescale_output(
-                x0, f0, a0, dir, t_min, y, dy, var_f, var_df, beta, a_stats
-            )
+            t_min = ts_wolfe[min_m_idx]
+            y, dy = _evaluate_objective(f, f0, t_min, x0, a0, dir, beta)
+            return _rescale_output(x0, f0, a0, dir, t_min, y, dy, beta, a_stats)
 
         t_max = max(gp.ts)
         ts_cand.append(t_max + t_ext)
         ms_cand.append(gp.mu(t_max + t_ext))
         ss_cand.append(torch.sqrt(gp.V(t_max + t_ext)))
 
-        ei_cand = _expected_improvement(ms_cand, ss_cand, t_min)
-        pw_cand = torch.tensor([_prob_wolfe(t, df0, gp) for t in ts_cand])
+        ei_cand = _expected_improvement(ms_cand, ss_cand, m_min)
+        pw_cand = torch.tensor([_prob_wolfe(t, gp) for t in ts_cand])
 
         t_best_cand = ts_cand[torch.argmax(ei_cand * pw_cand)]
         if t_best_cand == tt + t_ext:
@@ -151,33 +141,28 @@ def prob_line_search(
 
     # Reached limit without finding acceptable point
     # Evaluate a final time, return point with lowest function value
-    y, dy, var_f, var_df = _evaluate_objective(f, f0, tt, x0, a0, dir, beta)
-    gp.add(tt, y, dy, var_f, var_df)
+    y, dy = _evaluate_objective(f, f0, tt, x0, a0, dir, beta)
+    gp.add(tt, y, dy)
     gp.update()
 
-    if _prob_wolfe(tt, df0, gp) > wolfe_threshold:
-        return _rescale_output(x0, f0, a0, dir, tt, y, dy, var_f, var_df, beta, a_stats)
+    if _prob_wolfe(tt, gp) > wolfe_threshold:
+        return _rescale_output(x0, f0, a0, dir, tt, y, dy, beta, a_stats)
 
-    ms = [gp.mu(t) for t in gp.ts]
-    t_lowest = gp.ts[np.argmin(ms)]
+    ms = [gp.mu(t) for t in gp.ts[1:]]
+    t_lowest = gp.ts[np.argmin(ms) + 1]
     if t_lowest == tt:
-        return _rescale_output(x0, f0, a0, dir, tt, y, dy, var_f, var_df, beta, a_stats)
+        return _rescale_output(x0, f0, a0, dir, tt, y, dy, beta, a_stats)
 
     tt = t_lowest
-    y, dy, var_f, var_df = _evaluate_objective(f, f0, tt, x0, a0, dir, beta)
-    return _rescale_output(x0, f0, a0, dir, tt, y, dy, var_f, var_df, beta, a_stats)
+    y, dy = _evaluate_objective(f, f0, tt, x0, a0, dir, beta)
+    return _rescale_output(x0, f0, a0, dir, tt, y, dy, beta, a_stats)
 
 
-def _rescale_output(x0, f0, a0, dir, tt, y, dy, var_f, var_df, beta, a_stats):
+def _rescale_output(x0, f0, a0, dir, tt, y, dy, beta, a_stats):
     a_ext = 1.3
     theta_reset = 100
 
     a_acc = tt * a0
-    x_acc = x0 + a_acc * dir
-    f_acc = y * (a0 * beta) + f0
-    df_acc = dy
-    var_f_acc = var_f
-    var_df_acc = var_df
     gamma = 0.95
     a_stats = gamma * a_stats + (1 - gamma) * a_acc
     a_next = a_acc * a_ext
@@ -185,15 +170,14 @@ def _rescale_output(x0, f0, a0, dir, tt, y, dy, var_f, var_df, beta, a_stats):
     if (a_next < a_stats / theta_reset) or (a_next > a_stats * theta_reset):
         a_next = a_stats
 
-    return float(a_next), a_stats, x_acc, f_acc, df_acc, var_f_acc, var_df_acc
+    return float(a_acc), float(a_next), float(a_stats)
 
 
 def _evaluate_objective(f, f0, tt, x0, a0, dir, beta):
     y, dy = f(x0 + tt * a0 * dir)
-    var_f, var_df = 0, 0
     y = (y - f0) / (a0 * beta)
     dy = (dy.t() @ dir) / beta
-    return y, dy, var_f, var_df
+    return y, dy
 
 
 def _cubic_minimum(t, gp: ProbLSGaussianProcess):
@@ -224,7 +208,7 @@ def _cubic_minimum(t, gp: ProbLSGaussianProcess):
     return rr
 
 
-def _prob_wolfe(t, df0, gp: ProbLSGaussianProcess, c1=0.05, c2=0.5, strong=True):
+def _prob_wolfe(t, gp: ProbLSGaussianProcess, c1=0.05, c2=0.5):
     # Mean and covariance values at start position t = 0
     mu0 = gp.mu(0)
     dmu0 = gp.d1mu(0)
@@ -282,5 +266,5 @@ def _expected_improvement(m, s, eta):
     m = torch.as_tensor(m)
     s = torch.as_tensor(s)
     m = m.to(s)
-    z = (eta - m) / s  # .view(-1)
+    z = (eta - m) / s
     return (eta - m) * std_norm_cdf(z) + s * std_norm_pdf(z)
