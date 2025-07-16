@@ -1,10 +1,7 @@
 import logging
 from functools import cache
 
-import numpy as np
 import torch
-from scipy.integrate import dblquad
-from scipy.stats import multivariate_normal
 from torch import Tensor
 
 from ..utils.matrix import block_tensor
