@@ -38,8 +38,8 @@ import numpy as np
 import torch
 from torch import Tensor
 
-from .bvn import bvn_prob, std_norm_cdf, std_norm_pdf
-from .gaussian_process import ProbLSGaussianProcess
+from ..utils.bvn import bvn_prob, std_norm_cdf, std_norm_pdf
+from ..utils.gaussian_process import ProbLSGaussianProcess
 
 logger = logging.getLogger(__name__)
 
@@ -59,15 +59,15 @@ def prob_line_search(
     wolfe_threshold = 0.3
 
     # Scaling and noise level of GP
-    beta = torch.abs(dir.t() @ df0).item()  # NOTE: df0 not var_df0 as in pseudocode
+    beta = torch.abs(dir @ df0).item()  # NOTE: df0 not var_df0 as in pseudocode
     sigma_f = (torch.sqrt(var_f0) / (a0 * beta)).item()
-    sigma_df = (torch.sqrt((dir**2).t() @ var_df0) / beta).item()
+    sigma_df = (torch.sqrt((dir**2) @ var_df0) / beta).item()
 
     gp = ProbLSGaussianProcess(sigma_f, sigma_df)
     t_ext = 1.0  # Scaled step size for extrapolation
     tt = 1.0  # Scaled position of first function evaluation
 
-    gp.add(0.0, 0.0, (df0.t() @ dir) / beta)
+    gp.add(0.0, 0.0, (df0 @ dir) / beta)
     gp.update()
 
     while gp.N < L + 1:
@@ -176,7 +176,7 @@ def _rescale_output(x0, f0, a0, dir, tt, y, dy, beta, a_stats):
 def _evaluate_objective(f, f0, tt, x0, a0, dir, beta):
     y, dy = f(x0 + tt * a0 * dir)
     y = (y - f0) / (a0 * beta)
-    dy = (dy.t() @ dir) / beta
+    dy = (dy @ dir) / beta
     return y, dy
 
 
