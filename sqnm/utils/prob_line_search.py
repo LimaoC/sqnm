@@ -265,9 +265,6 @@ def _prob_wolfe(t, df0, gp: ProbLSGaussianProcess, c1=0.05, c2=0.5, strong=True)
     # Noisy case (everything is alright)
     # Correlation
     rho = (V_ab / torch.sqrt(V_aa * V_bb)).item()
-    if not (-1 <= rho <= 1):
-        logger.debug(f"{V_ab=}, {V_aa=}, {V_bb=}")
-        logger.debug(f"{rho=}")
 
     # Lower and upper integral limits for Armijo condition
     low_a = float(-mu_a / torch.sqrt(V_aa))
@@ -278,7 +275,7 @@ def _prob_wolfe(t, df0, gp: ProbLSGaussianProcess, c1=0.05, c2=0.5, strong=True)
     b_bar = 2 * c2 * (torch.abs(dmu0) + 2 * torch.sqrt(dVd0))
     up_b = float((b_bar - mu_b) / torch.sqrt(V_bb))
 
-    return bvn_prob(rho, low_a, up_a, low_b, up_b)
+    return bvn_prob(low_a, up_a, low_b, up_b, rho)
 
 
 def _expected_improvement(m, s, eta):

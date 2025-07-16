@@ -43,15 +43,13 @@ def bvn_prob(xl, xu, yl, yu, rho):
     Compute the bivariate normal probability that xl < x < xu and yl < y < yu,
     with mean 0 and covariance matrix [[1, rho], [rho, 1]].
     """
-    rho = np.clip(rho, -1.0, 1.0)
-    return np.clip(
+    p = (
         bvn_prob_unbounded(xl, yl, rho)
         - bvn_prob_unbounded(xu, yl, rho)
         - bvn_prob_unbounded(xl, yu, rho)
-        + bvn_prob_unbounded(xu, yu, rho),
-        0.0,
-        1.0,
+        + bvn_prob_unbounded(xu, yu, rho)
     )
+    return max(0.0, min(1.0, p))
 
 
 def bvn_prob_unbounded(xl, yl, rho):
@@ -59,6 +57,7 @@ def bvn_prob_unbounded(xl, yl, rho):
     Compute the bivariate normal probability that x > xl and y > yl,
     with mean 0 and covariance matrix [[1, rho], [rho, 1]]
     """
+    rho = max(-1.0, min(1.0, rho))
     if np.isposinf(xl) or np.isposinf(yl):
         return 0.0
     if np.isneginf(xl):
@@ -77,7 +76,7 @@ def bvn_prob_unbounded(xl, yl, rho):
     if np.abs(rho) < 0.3:
         # Gauss Legendre points and weights, n = 6
         w = np.array([0.1713244923791705, 0.3607615730481384, 0.4679139345726904])
-        x = np.array([[0.9324695142031522, 0.6612093864662647, 0.2386191860831970]])
+        x = np.array([0.9324695142031522, 0.6612093864662647, 0.2386191860831970])
     elif np.abs(rho) < 0.75:
         # Gauss Legendre points and weights, n = 12
         w = np.array(
@@ -135,27 +134,27 @@ def bvn_prob_unbounded(xl, yl, rho):
     x = np.concatenate([1.0 - x, 1.0 + x])
 
     if np.abs(rho) < 0.925:
-        hs = (h * h + k * k) * 0.5
-        asr = np.asin(rho) * 0.5
+        hs = 0.5 * (h * h + k * k)
+        asr = 0.5 * np.arcsin(rho)
         sn = np.sin(asr * x)
         bvn = np.dot(w, np.exp((sn * hk - hs) / (1.0 - sn**2)))
-        bvn = bvn * asr / tp + std_norm_cdf(-h) + std_norm_cdf(-k)
+        bvn = bvn * asr / tp + std_norm_cdf(-h) * std_norm_cdf(-k)
     else:
         if rho < 0.0:
             k = -k
-            h = -hk
+            hk = -hk
         if np.abs(rho) < 1.0:
-            as_ = 1.0 - rho**2
-            a = np.sqrt(as_)
+            ass = 1.0 - rho**2
+            a = np.sqrt(ass)
             bs = (h - k) ** 2
-            asr = -0.5 * (bs / as_ + hk)
+            asr = -0.5 * (bs / ass + hk)
             c = (4.0 - hk) / 8.0
             d = (12.0 - hk) / 80.0
             if asr > -100.0:
                 bvn = (
                     a
                     * np.exp(asr)
-                    * (1.0 - c * (bs - as_) * (1.0 - d * bs) / 3.0 + c * d * as_**2)
+                    * (1.0 - c * (bs - ass) * (1.0 - d * bs) / 3.0 + c * d * ass**2)
                 )
             if hk > -100.0:
                 b = np.sqrt(bs)
@@ -165,7 +164,7 @@ def bvn_prob_unbounded(xl, yl, rho):
                 )
             a *= 0.5
             xs = (a * x) ** 2
-            asr = (-bs / xs + hk) * 0.5
+            asr = -0.5 * (bs / xs + hk)
             idxs = (asr > -100.0).nonzero()
             xs = xs[idxs]
             sp = 1.0 + c * xs * (1.0 + 5.0 * d * xs)
@@ -182,7 +181,7 @@ def bvn_prob_unbounded(xl, yl, rho):
             else:
                 L = std_norm_cdf(-h) - std_norm_cdf(-k)
             bvn = L - bvn
-    return np.clip(bvn, 0.0, 1.0)
+    return max(0.0, min(1.0, bvn))
 
 
 def std_norm_cdf(z):
