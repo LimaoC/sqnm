@@ -237,7 +237,7 @@ def _prob_wolfe(t, gp: ProbLSGaussianProcess, c1=0.05, c2=0.5):
 
     # Extremely small variances ==> very certain (deterministic evaluation)
     if V_aa <= 1e-9 and V_bb <= 1e-9:
-        return (mu_a >= 0) * (mu_b >= 0)
+        return ((mu_a >= 0) * (mu_b >= 0)).float()
 
     # Zero or negative variances (maybe something went wrong?)
     if V_aa <= 0 or V_bb <= 0:
