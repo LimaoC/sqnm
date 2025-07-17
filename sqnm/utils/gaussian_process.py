@@ -35,7 +35,6 @@ class ProbLSGaussianProcess:
         self.ys.append(y)
         self.dys.append(dy)
 
-    def update(self):
         self.K = _k(self.ts_vec.unsqueeze(1), self.ts_vec.unsqueeze(0))
         self.Kd = _kd(self.ts_vec.unsqueeze(1), self.ts_vec.unsqueeze(0))
         self.dKd = _dkd(self.ts_vec.unsqueeze(1), self.ts_vec.unsqueeze(0))

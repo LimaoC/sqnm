@@ -68,12 +68,10 @@ def prob_line_search(
     tt = 1.0  # Scaled position of first function evaluation
 
     gp.add(0.0, 0.0, (df0 @ dir) / beta)
-    gp.update()
 
     while gp.N < L + 1:
         y, dy = _evaluate_objective(f, f0, tt, x0, a0, dir, beta)
         gp.add(tt, y, dy)
-        gp.update()
 
         if _prob_wolfe(tt, gp) > wolfe_threshold:
             return _rescale_output(x0, f0, a0, dir, tt, y, dy, beta, a_stats)
@@ -143,7 +141,6 @@ def prob_line_search(
     # Evaluate a final time, return point with lowest function value
     y, dy = _evaluate_objective(f, f0, tt, x0, a0, dir, beta)
     gp.add(tt, y, dy)
-    gp.update()
 
     if _prob_wolfe(tt, gp) > wolfe_threshold:
         return _rescale_output(x0, f0, a0, dir, tt, y, dy, beta, a_stats)
