@@ -41,28 +41,6 @@ class SQNHv(SQNBase):
         state["num_curvature_iters"] = -1
         state["xt"] = [torch.zeros_like(self._get_param_vector())]
 
-    def _two_loop_recursion_check_curvature_pairs(self):
-        """
-        Check that we're accessing the correct (s, y) pairs when computing the two loop
-        recursion - they should all be non-zero vectors
-        """
-        group = self.param_groups[0]
-        state = self.state[self._params[0]]
-        m = group["history_size"]
-        # The paper's t index is off by 1 compared to the convention
-        # They define s_t = x_t - x_{t-1} instead of s_{t-1} = x_t - x_{t-1}
-        # Account for this here
-        t = state["num_curvature_iters"] - 1
-        sy_history = state["sy_history"]
-
-        for i in range(max(t - m, 0), t):
-            s_prev, y_prev = sy_history[i % m]
-            if torch.all(s_prev == 0) or torch.all(y_prev == 0):
-                logger.warning(
-                    f"Found a (s, y) pair at index {i} that is zero - "
-                    "this is likely an error"
-                )
-
     def _two_loop_recursion(self, grad: Tensor) -> Tensor:
         """
         Two loop recursion for computing H_k * grad
@@ -74,10 +52,10 @@ class SQNHv(SQNBase):
         group = self.param_groups[0]
         state = self.state[self._params[0]]
         m = group["history_size"]
+        # The paper's t index is off by 1 compared to the convention, account for this
+        # They define s_t = x_t - x_{t-1} instead of s_{t-1} = x_t - x_{t-1}
         t = state["num_curvature_iters"] - 1
         sy_history = state["sy_history"]
-
-        self._two_loop_recursion_check_curvature_pairs()
 
         q = grad.clone()
         alphas = torch.zeros(m)

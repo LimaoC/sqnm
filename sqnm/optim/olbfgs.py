@@ -33,7 +33,7 @@ class OLBFGS(SQNBase):
         Online limited-memory BFGS (oL-BFGS)
         """
         if line_search_fn is not None and line_search_fn != "prob_wolfe":
-            raise ValueError("LBFGS only supports probabilistic Wolfe line search")
+            raise ValueError("o-LBFGS only supports probabilistic Wolfe line search")
 
         defaults = dict(
             history_size=history_size,
@@ -67,8 +67,6 @@ class OLBFGS(SQNBase):
         k = state["num_iters"]
         sy_history = state["sy_history"]
 
-        self._two_loop_recursion_check_curvature_pairs()
-
         q = grad.clone()
         alphas = torch.zeros(m)
         s_prev, y_prev = sy_history[(k - 1) % m]
@@ -99,9 +97,10 @@ class OLBFGS(SQNBase):
 
         Parameters:
             closure: A closure that re-evaluates the model and returns the loss.
-            fn: A pure function that computes the loss for a given input. The function
-                should take a boolean parameter which, if True, also returns the
-                gradient, loss variance, and gradient variance.
+            fn: A pure function that computes the loss for a given input. Required if
+                line_search_fn == "prob_wolfe". The function should take a boolean
+                parameter which, if True, also returns the gradient, loss variance, and
+                gradient variance.
         """
         # Get state and hyperparameter variables
         group = self.param_groups[0]

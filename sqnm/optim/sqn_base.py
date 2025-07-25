@@ -36,9 +36,8 @@ class SQNBase(Optimizer):
         state["num_iters"] = 0
         # Store the m most recent (s, y) pairs
         # s is the iterate difference, y is the gradient difference
-        d = self._get_param_vector().shape[0]
         m = defaults["history_size"]
-        state["sy_history"] = [(torch.zeros(d), torch.zeros(d)) for _ in range(m)]
+        state["sy_history"] = [(None, None) for _ in range(m)]
 
     def _get_grad_vector(self) -> Tensor:
         """Concatenates gradients from all parameters into a 1D tensor"""
@@ -61,25 +60,6 @@ class SQNBase(Optimizer):
                 param.copy_(vec[offset : offset + numel].view_as(param))
                 offset += numel
 
-    def _two_loop_recursion_check_curvature_pairs(self):
-        """
-        Check that we're accessing the correct (s, y) pairs when computing the two loop
-        recursion - they should all be non-zero vectors
-        """
-        group = self.param_groups[0]
-        state = self.state[self._params[0]]
-        m = group["history_size"]
-        k = state["num_iters"]
-        sy_history = state["sy_history"]
-
-        for i in range(max(k - m, 0), k):
-            s_prev, y_prev = sy_history[i % m]
-            if torch.all(s_prev == 0) or torch.all(y_prev == 0):
-                logger.warning(
-                    f"Found a (s, y) pair at index {i} that is zero - "
-                    "this is likely an error"
-                )
-
     def _two_loop_recursion(self, grad: Tensor) -> Tensor:
         """
         Two loop recursion for computing H_k * grad
@@ -94,8 +74,6 @@ class SQNBase(Optimizer):
         m = group["history_size"]
         k = state["num_iters"]
         sy_history = state["sy_history"]
-
-        self._two_loop_recursion_check_curvature_pairs()
 
         q = grad.clone()
         alphas = torch.zeros(m)
