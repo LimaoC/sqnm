@@ -44,9 +44,7 @@ class SQNBase(Optimizer):
         """Concatenates gradients from all parameters into a 1D tensor"""
         grads = []
         for param in self._params:
-            if param.grad is None:
-                grads.append(torch.zeros_like(param.data).view(-1))
-            else:
+            if param.grad is not None:
                 grads.append(param.grad.view(-1))
         return torch.cat(grads)
 
@@ -57,10 +55,11 @@ class SQNBase(Optimizer):
     def _set_param_vector(self, vec: Tensor):
         """Set model parameters to the given tensor"""
         offset = 0
-        for param in self._params:
-            numel = param.numel()
-            param.data.copy_(vec[offset : offset + numel].view_as(param))
-            offset += numel
+        with torch.no_grad():
+            for param in self._params:
+                numel = param.numel()
+                param.copy_(vec[offset : offset + numel].view_as(param))
+                offset += numel
 
     def _two_loop_recursion_check_curvature_pairs(self):
         """
