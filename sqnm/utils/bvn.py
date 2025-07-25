@@ -35,7 +35,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
 
 import numpy as np
-from scipy.special import erf
+from scipy.special import erf  # type: ignore[import-untyped]
 
 
 def bvn_prob(xl, xu, yl, yu, rho):
