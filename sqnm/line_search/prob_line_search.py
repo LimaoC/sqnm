@@ -33,6 +33,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
 
 import logging
+from typing import Callable
 
 import numpy as np
 import torch
@@ -45,22 +46,24 @@ logger = logging.getLogger(__name__)
 
 
 def prob_line_search(
-    f,
+    fn: Callable[[Tensor], Tensor],
     x0: Tensor,  # [d]
     dir: Tensor,  # [d]
-    f0,  # float
-    df0,  # [d]
-    var_f0,  # float
+    f0: float,
+    df0: Tensor,  # [d]
+    var_f0: float,  # float
     var_df0: Tensor,  # [d]
-    a0,
-    a_stats,
+    a0: float,
+    a_stats: float,
 ):
+    grad_fn = torch.func.grad(fn)
+
     L = 6  # Max number of f evaluations per line search
     wolfe_threshold = 0.3
 
     # Scaling and noise level of GP
     beta = torch.abs(dir @ df0).item()  # NOTE: df0 not var_df0 as in pseudocode
-    sigma_f = (torch.sqrt(var_f0) / (a0 * beta)).item()
+    sigma_f = (var_f0 ** (1 / 2)) / (a0 * beta)
     sigma_df = (torch.sqrt((dir**2) @ var_df0) / beta).item()
 
     gp = ProbLSGaussianProcess(sigma_f, sigma_df)
@@ -70,7 +73,7 @@ def prob_line_search(
     gp.add(0.0, 0.0, (df0 @ dir) / beta)
 
     while gp.N < L + 1:
-        y, dy = _evaluate_objective(f, f0, tt, x0, a0, dir, beta)
+        y, dy = _evaluate_objective(fn, grad_fn, f0, tt, x0, a0, dir, beta)
         gp.add(tt, y, dy)
 
         if _prob_wolfe(tt, gp) > wolfe_threshold:
@@ -108,7 +111,9 @@ def prob_line_search(
             else:
                 if n == 0 and gp.d1mu(0) > 0:
                     t_cand = 0.01 * (ts_sorted[n] + ts_sorted[n + 1])
-                    y, dy = _evaluate_objective(f, f0, t_cand, x0, a0, dir, beta)
+                    y, dy = _evaluate_objective(
+                        fn, grad_fn, f0, t_cand, x0, a0, dir, beta
+                    )
                     return _rescale_output(
                         x0, f0, a0, dir, t_cand, y, dy, beta, a_stats
                     )
@@ -120,7 +125,7 @@ def prob_line_search(
             ms_wolfe = [gp.mu(t) for t in ts_wolfe]
             min_m_idx = np.argmin(ms_wolfe)
             t_min = ts_wolfe[min_m_idx]
-            y, dy = _evaluate_objective(f, f0, t_min, x0, a0, dir, beta)
+            y, dy = _evaluate_objective(fn, grad_fn, f0, t_min, x0, a0, dir, beta)
             return _rescale_output(x0, f0, a0, dir, t_min, y, dy, beta, a_stats)
 
         t_max = max(gp.ts)
@@ -139,7 +144,7 @@ def prob_line_search(
 
     # Reached limit without finding acceptable point
     # Evaluate a final time, return point with lowest function value
-    y, dy = _evaluate_objective(f, f0, tt, x0, a0, dir, beta)
+    y, dy = _evaluate_objective(fn, grad_fn, f0, tt, x0, a0, dir, beta)
     gp.add(tt, y, dy)
 
     if _prob_wolfe(tt, gp) > wolfe_threshold:
@@ -151,7 +156,7 @@ def prob_line_search(
         return _rescale_output(x0, f0, a0, dir, tt, y, dy, beta, a_stats)
 
     tt = t_lowest
-    y, dy = _evaluate_objective(f, f0, tt, x0, a0, dir, beta)
+    y, dy = _evaluate_objective(fn, grad_fn, f0, tt, x0, a0, dir, beta)
     return _rescale_output(x0, f0, a0, dir, tt, y, dy, beta, a_stats)
 
 
@@ -170,8 +175,9 @@ def _rescale_output(x0, f0, a0, dir, tt, y, dy, beta, a_stats):
     return float(a_acc), float(a_next), float(a_stats)
 
 
-def _evaluate_objective(f, f0, tt, x0, a0, dir, beta):
-    y, dy = f(x0 + tt * a0 * dir)
+def _evaluate_objective(fn, grad_fn, f0, tt, x0, a0, dir, beta):
+    y = fn(x0 + tt * a0 * dir)
+    dy = grad_fn(x0 + tt * a0 * dir)
     y = (y - f0) / (a0 * beta)
     dy = (dy @ dir) / beta
     return y, dy
