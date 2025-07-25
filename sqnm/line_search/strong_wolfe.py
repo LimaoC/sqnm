@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 def strong_wolfe_line_search(
-    f: Callable[[Tensor], float],
+    f: Callable[[Tensor], Tensor],
     grad_f: Callable[[Tensor], Tensor],
     xk: Tensor,
     pk: Tensor,
@@ -41,7 +41,7 @@ def strong_wolfe_line_search(
 
     @cache
     def phi(a_k: float) -> float:
-        return f(xk + a_k * pk)
+        return f(xk + a_k * pk).item()
 
     @cache
     def grad_phi(a_k: float) -> float:
@@ -102,7 +102,7 @@ def strong_wolfe_line_search(
     phi_prev = phi(0)
 
     iters = 1
-    while iters < max_iters:
+    while iters <= max_iters:
         # Armijo/sufficient decrease condition
         armijo_cond = phi(a_curr) <= phi(0) + c1 * a_curr * grad_phi(0)
         if not armijo_cond or (phi(a_curr) >= phi_prev and iters > 1):
