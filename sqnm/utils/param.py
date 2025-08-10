@@ -1,4 +1,7 @@
+from typing import Iterable
+
 import torch
+import torch.nn as nn
 from torch import Tensor
 
 
@@ -16,3 +19,12 @@ def unflatten(
 
 def flatten(params: dict) -> Tensor:
     return torch.cat([param.flatten() for param in params.values()])
+
+
+def grad_vec(params: Iterable[nn.Parameter]) -> Tensor:
+    """Concatenates gradients from params into a 1D tensor"""
+    grads = []
+    for param in params:
+        if param.grad is not None:
+            grads.append(param.grad.view(-1))
+    return torch.cat(grads)

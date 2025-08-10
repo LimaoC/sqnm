@@ -10,6 +10,8 @@ from torch import Tensor
 from torch.optim import Optimizer
 from torch.optim.optimizer import ParamsT
 
+from ..utils.param import grad_vec
+
 logger = logging.getLogger(__name__)
 
 
@@ -41,11 +43,7 @@ class SQNBase(Optimizer):
 
     def _get_grad_vector(self) -> Tensor:
         """Concatenates gradients from all parameters into a 1D tensor"""
-        grads = []
-        for param in self._params:
-            if param.grad is not None:
-                grads.append(param.grad.view(-1))
-        return torch.cat(grads)
+        return grad_vec(self._params)
 
     def _get_param_vector(self) -> Tensor:
         """Concatenates all parameters into a 1D tensor"""
