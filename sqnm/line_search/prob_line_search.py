@@ -58,7 +58,7 @@ def prob_line_search(
 ):
     grad_fn = torch.func.grad(fn)
 
-    L = 6  # Max number of f evaluations per line search
+    L = 20  # Max number of f evaluations per line search
     wolfe_threshold = 0.3
 
     # Scaling and noise level of GP
@@ -105,7 +105,7 @@ def prob_line_search(
                     not (torch.isnan(t_cub_min) or torch.isinf(t_cub_min))
                     and t_cub_min > 0
                 ):
-                    ts_cand.append(t_cub_min)
+                    ts_cand.append(t_cub_min.item())
                     ms_cand.append(gp.mu(t_cub_min))
                     ss_cand.append(gp.V(t_cub_min))
             else:
