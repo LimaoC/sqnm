@@ -33,6 +33,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
 
 import logging
+from functools import cache
 from typing import Callable
 
 import numpy as np
@@ -53,13 +54,11 @@ def prob_line_search(
     df0: Tensor,  # [d]
     var_f0: float,  # float
     var_df0: Tensor,  # [d]
-    a0: float,
-    a_stats: float,
+    a0: float = 1.0,  # QN methods should try a step size of 1.0 first
+    L: int = 20,  # max number of function evaluations
+    wolfe_threshold: float = 0.3,
 ):
     grad_fn = torch.func.grad(fn)
-
-    L = 20  # Max number of f evaluations per line search
-    wolfe_threshold = 0.3
 
     # Scaling and noise level of GP
     beta = torch.abs(dir @ df0).item()  # NOTE: df0 not var_df0 as in pseudocode
@@ -67,119 +66,110 @@ def prob_line_search(
     sigma_df = (torch.sqrt((dir**2) @ var_df0) / beta).item()
 
     gp = ProbLSGaussianProcess(sigma_f, sigma_df)
-    t_ext = 1.0  # Scaled step size for extrapolation
+    tt_ext = 1.0  # Scaled step size for extrapolation
     tt = 1.0  # Scaled position of first function evaluation
 
     gp.add(0.0, 0.0, (df0 @ dir) / beta)
 
-    while gp.N < L + 1:
+    while gp.N < L - 1:
+        # Evaluate objective at tt, check if Wolfe prob. is above threshold
         y, dy = _evaluate_objective(fn, grad_fn, f0, tt, x0, a0, dir, beta)
         gp.add(tt, y, dy)
-
         if _prob_wolfe(tt, gp) > wolfe_threshold:
-            return _rescale_output(x0, f0, a0, dir, tt, y, dy, beta, a_stats)
+            return tt
 
+        # Find suitable candidates for next evaluation
         ms = [gp.mu(t) for t in gp.ts]
         dms = [gp.d1mu(t) for t in gp.ts]
 
         min_m_idx = np.argmin(ms)
-        m_min, t_min, dm_min = ms[min_m_idx], gp.ts[min_m_idx], dms[min_m_idx]
+        m_min, tt_min, dm_min = ms[min_m_idx], gp.ts[min_m_idx], dms[min_m_idx]
 
-        if torch.abs(dm_min) < 1e-5 and gp.Vd(t_min) < 1e-4:  # nearly deterministic
+        # Check for nearly deterministic (small variance) step size with near zero grad
+        if torch.abs(dm_min) < 1e-5 and gp.Vd(tt_min) < 1e-4:
+            # Stop here - though Wolfe conditions may not be guaranteed
             y = gp.ys[min_m_idx]
             dy = gp.dys[min_m_idx]
-            return _rescale_output(x0, f0, a0, dir, t_min, y, dy, beta, a_stats)
+            return tt
 
-        ts_sorted = sorted(gp.ts)
+        # Sort both gp.ts and ms, according to sort order for gp.ts
+        ts_sorted, ms_sorted = zip(*sorted(zip(gp.ts, ms)))
         ts_cand = []
         ms_cand = []
         ss_cand = []
+
         ts_wolfe = []
+        ms_wolfe = []
 
+        # Find local minima in all N - 1 cells
         for n in range(gp.N - 1):
-            t_rep = ts_sorted[n] + 1e-6 * (ts_sorted[n + 1] - ts_sorted[n])
-            t_cub_min = _cubic_minimum(t_rep, gp)
+            tt_rep = ts_sorted[n] + 1e-6 * (ts_sorted[n + 1] - ts_sorted[n])
+            tt_cub_min = _cubic_minimum(tt_rep, gp)
 
-            if ts_sorted[n] < t_cub_min < ts_sorted[n + 1]:
+            # If cubic minimum lies in [T_n, T_{n+1}], it is a candidate
+            # Otherwise, check if we are going uphill, and break early if so
+            if ts_sorted[n] < tt_cub_min < ts_sorted[n + 1]:
                 if (
-                    not (torch.isnan(t_cub_min) or torch.isinf(t_cub_min))
-                    and t_cub_min > 0
+                    not (torch.isnan(tt_cub_min) or torch.isinf(tt_cub_min))
+                    and tt_cub_min > 0
                 ):
-                    ts_cand.append(t_cub_min.item())
-                    ms_cand.append(gp.mu(t_cub_min))
-                    ss_cand.append(gp.V(t_cub_min))
-            else:
-                if n == 0 and gp.d1mu(0) > 0:
-                    t_cand = 0.01 * (ts_sorted[n] + ts_sorted[n + 1])
-                    y, dy = _evaluate_objective(
-                        fn, grad_fn, f0, t_cand, x0, a0, dir, beta
-                    )
-                    return _rescale_output(
-                        x0, f0, a0, dir, t_cand, y, dy, beta, a_stats
-                    )
+                    ts_cand.append(tt_cub_min.item())
+                    ms_cand.append(gp.mu(tt_cub_min))
+                    ss_cand.append(torch.sqrt(gp.V(tt_cub_min)))  # NOTE: Take sqrt here
+            elif n == 0 and gp.d1mu(0) > 0:
+                tt = 0.01 * (ts_sorted[n] + ts_sorted[n + 1])
+                return tt
 
+            # Check if an old step size is now acceptable
             if n > 0 and _prob_wolfe(ts_sorted[n], gp) > wolfe_threshold:
                 ts_wolfe.append(ts_sorted[n])
+                ms_wolfe.append(ms_sorted[n])
 
+        # If any points are acceptable, return the step size with the lowest GP mean,
+        # with preference for the current step size tt
         if len(ts_wolfe) > 0:
-            ms_wolfe = [gp.mu(t) for t in ts_wolfe]
-            min_m_idx = np.argmin(ms_wolfe)
-            t_min = ts_wolfe[min_m_idx]
-            y, dy = _evaluate_objective(fn, grad_fn, f0, t_min, x0, a0, dir, beta)
-            return _rescale_output(x0, f0, a0, dir, t_min, y, dy, beta, a_stats)
+            if tt in ts_wolfe:
+                return tt
+            tt = ts_wolfe[np.argmin(ms_wolfe)]
+            return tt
 
-        t_max = max(gp.ts)
-        ts_cand.append(t_max + t_ext)
-        ms_cand.append(gp.mu(t_max + t_ext))
-        ss_cand.append(torch.sqrt(gp.V(t_max + t_ext)))
+        tt_next = max(gp.ts) + tt_ext
+        ts_cand.append(tt_next)
+        ms_cand.append(gp.mu(tt_next))
+        ss_cand.append(torch.sqrt(gp.V(tt_next)))
 
+        # m_min: Collected (not candidate) step size with lowest GP mean
         ei_cand = _expected_improvement(ms_cand, ss_cand, m_min)
         pw_cand = torch.tensor([_prob_wolfe(t, gp) for t in ts_cand])
-
         t_best_cand = ts_cand[torch.argmax(ei_cand * pw_cand)]
-        if t_best_cand == tt + t_ext:
-            t_ext *= 2
 
+        # Extend extrapolation step if necessary
+        if t_best_cand == tt_next:
+            tt_ext *= 2
         tt = t_best_cand
 
-    # Reached limit without finding acceptable point
-    # Evaluate a final time, return point with lowest function value
+    # Reached budget without finding acceptable point, check final point for acceptance
     y, dy = _evaluate_objective(fn, grad_fn, f0, tt, x0, a0, dir, beta)
     gp.add(tt, y, dy)
-
     if _prob_wolfe(tt, gp) > wolfe_threshold:
-        return _rescale_output(x0, f0, a0, dir, tt, y, dy, beta, a_stats)
+        return tt
 
+    # Otherwise - return point with lowest GP mean
     ms = [gp.mu(t) for t in gp.ts[1:]]
     t_lowest = gp.ts[np.argmin(ms) + 1]
-    if t_lowest == tt:
-        return _rescale_output(x0, f0, a0, dir, tt, y, dy, beta, a_stats)
-
-    tt = t_lowest
-    y, dy = _evaluate_objective(fn, grad_fn, f0, tt, x0, a0, dir, beta)
-    return _rescale_output(x0, f0, a0, dir, tt, y, dy, beta, a_stats)
-
-
-def _rescale_output(x0, f0, a0, dir, tt, y, dy, beta, a_stats):
-    a_ext = 1.3
-    theta_reset = 100
-
-    a_acc = tt * a0
-    gamma = 0.95
-    a_stats = gamma * a_stats + (1 - gamma) * a_acc
-    a_next = a_acc * a_ext
-
-    if (a_next < a_stats / theta_reset) or (a_next > a_stats * theta_reset):
-        a_next = a_stats
-
-    return float(a_acc), float(a_next), float(a_stats)
+    logger.warning(
+        "prob_line_search() returning without an acceptable point, "
+        f"defaulting to step size with lowest GP mean ({t_lowest:.4f})."
+    )
+    return t_lowest
 
 
+@cache
 def _evaluate_objective(fn, grad_fn, f0, tt, x0, a0, dir, beta):
-    y = fn(x0 + tt * a0 * dir)
-    dy = grad_fn(x0 + tt * a0 * dir)
-    y = (y - f0) / (a0 * beta)
-    dy = (dy @ dir) / beta
+    """Evaluates and re-scales function and gradient value"""
+    x = x0 + tt * a0 * dir
+    y = (fn(x) - f0) / (a0 * beta)
+    dy = (grad_fn(x) @ dir) / beta
     return y, dy
 
 
@@ -232,6 +222,14 @@ def _prob_wolfe(t, gp: ProbLSGaussianProcess, c1=0.05, c2=0.5):
     mu_b = gp.d1mu(t) - c2 * dmu0
     V_bb = (c2**2) * dVd0 - 2 * c2 * gp.Vd0df(t) + gp.dVd(t)
 
+    # Extremely small variances ==> very certain (deterministic evaluation)
+    if V_aa <= 1e-9 and V_bb <= 1e-9:
+        return ((mu_a >= 0) * (mu_b >= 0)).float()
+
+    # Zero or negative variances (maybe something went wrong?)
+    if V_aa <= 0 or V_bb <= 0:
+        return 0.0
+
     # Covariance between conditions
     V_ab = (
         -c2 * (Vd0 + c1 * t * dVd0)
@@ -240,14 +238,6 @@ def _prob_wolfe(t, gp: ProbLSGaussianProcess, c1=0.05, c2=0.5):
         + c1 * t * gp.Vd0df(t)
         - gp.Vd(t)
     )
-
-    # Extremely small variances ==> very certain (deterministic evaluation)
-    if V_aa <= 1e-9 and V_bb <= 1e-9:
-        return ((mu_a >= 0) * (mu_b >= 0)).float()
-
-    # Zero or negative variances (maybe something went wrong?)
-    if V_aa <= 0 or V_bb <= 0:
-        return 0.0
 
     # Noisy case (everything is alright)
     # Correlation

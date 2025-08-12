@@ -21,13 +21,12 @@ class OLBFGS(SQNBase):
     def __init__(
         self,
         params,
+        lr: float = 1e-3,
+        line_search_fn: str | None = None,
         history_size: int = 20,
         grad_tol: float = 1e-4,
-        line_search_fn: str | None = None,
         reg_term: float = 0.0,
-        c: float = 0.1,
-        alpha0: float = 0.1 * 100 / (100 + 2),
-        tau: float = 10,
+        step_size_weight: float = 1.0,
     ):
         """
         Online limited-memory BFGS (oL-BFGS)
@@ -36,20 +35,14 @@ class OLBFGS(SQNBase):
             raise ValueError("o-LBFGS only supports probabilistic Wolfe line search")
 
         defaults = dict(
+            lr=lr,
+            line_search_fn=line_search_fn,
             history_size=history_size,
             grad_tol=grad_tol,
-            line_search_fn=line_search_fn,
             reg_term=reg_term,
-            c=c,
-            alpha0=alpha0,
-            tau=tau,
+            step_size_weight=step_size_weight,
         )
         super().__init__(params, defaults)
-
-        state = self.state[self._params[0]]
-        # Used for probabilistic LS
-        state["alpha_start"] = 1.0
-        state["alpha_running_avg"] = state["alpha_start"]
 
     def _two_loop_recursion(self, grad: Tensor) -> Tensor:  # type: ignore[override]
         """
@@ -61,9 +54,9 @@ class OLBFGS(SQNBase):
         """
         group = self.param_groups[0]
         state = self.state[self._params[0]]
-        m = group["history_size"]
         line_search_fn = group["line_search_fn"]
-        c = group["c"]
+        m = group["history_size"]
+        c = group["step_size_weight"]
         k = state["num_iters"]
         sy_history = state["sy_history"]
 
@@ -78,7 +71,7 @@ class OLBFGS(SQNBase):
             q -= alphas[i - (k - m)] * y_prev
             const += s_prev.dot(y_prev) / y_prev.dot(y_prev)
         if line_search_fn is None:
-            alphas[-1] *= c  # Scale alpha_{k-1}
+            alphas[-1] *= c  # Scale alpha_{k-1} by step_size_weight
         r = const / min(k, m) * q
         for i in history_idxs:
             s_prev, y_prev = sy_history[i % m]
@@ -105,17 +98,14 @@ class OLBFGS(SQNBase):
         # Get state and hyperparameter variables
         group = self.param_groups[0]
         state = self.state[self._params[0]]
+        lr = group["lr"]
+        line_search_fn = group["line_search_fn"]
         m = group["history_size"]
         grad_tol = group["grad_tol"]
-        line_search_fn = group["line_search_fn"]
         reg_term = group["reg_term"]
-        c = group["c"]
-        alpha0 = group["alpha0"]
-        tau = group["tau"]
+        c = group["step_size_weight"]
         k = state["num_iters"]
         sy_history = state["sy_history"]
-        alpha_start = state["alpha_start"]
-        alpha_running_avg = state["alpha_running_avg"]
 
         ################################################################################
 
@@ -144,22 +134,13 @@ class OLBFGS(SQNBase):
             assert fn is not None
 
             f0, df0, var_f0, var_df0 = fn(xk, True)
-            alpha_k, alpha_start, alpha_running_avg = prob_line_search(
-                lambda x: fn(x, False),  # don't need to return vars in prob ls
-                xk,
-                pk,
-                f0,
-                df0,
-                var_f0,
-                var_df0,
-                alpha_start,
-                alpha_running_avg,
+            # don't need function handle to return vars in line search
+            alpha_k = prob_line_search(
+                lambda x: fn(x, False), xk, pk, f0, df0, var_f0, var_df0
             )
-            # Update alpha_start and alpha_running_avg for next iteration
-            state["alpha_start"] = alpha_start
-            state["alpha_running_avg"] = alpha_running_avg
         else:
-            alpha_k = tau * alpha0 / (tau + k) / c
+            # Use fixed step size
+            alpha_k = lr / c
 
         xk_next = xk + alpha_k * pk
         self._set_param_vector(xk_next)
