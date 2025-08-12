@@ -1,5 +1,5 @@
 import logging
-from functools import cache, wraps
+from functools import wraps
 
 import torch
 from torch import Tensor
@@ -81,30 +81,40 @@ class ProbLSGaussianProcess:
     @cached_computation
     def mu(self, t):
         """Posterior mean of GP at t"""
+        if not isinstance(t, Tensor):
+            t = torch.as_tensor(t)
         T = self.ts_vec
         return _concat(_k(t, T), _kd(t, T)) @ self.A
 
     @cached_computation
     def d1mu(self, t):
         """First derivative of posterior mean of GP at t"""
+        if not isinstance(t, Tensor):
+            t = torch.as_tensor(t)
         T = self.ts_vec
         return _concat(_dk(t, T), _dkd(t, T)) @ self.A
 
     @cached_computation
     def d2mu(self, t):
         """Second derivative of posterior mean of GP at t"""
+        if not isinstance(t, Tensor):
+            t = torch.as_tensor(t)
         T = self.ts_vec
         return _concat(_ddk(t, T), _ddkd(t, T)) @ self.A
 
     @cached_computation
     def d3mu(self, t):
         """Third derivative of posterior mean of GP at t"""
+        if not isinstance(t, Tensor):
+            t = torch.as_tensor(t)
         T = self.ts_vec
         return _concat(_dddk(t, T), torch.zeros(1, self.N)) @ self.A
 
     @cached_computation
     def V(self, t):
         """Posterior variance of function values at t"""
+        if not isinstance(t, Tensor):
+            t = torch.as_tensor(t)
         T = self.ts_vec
         k_tt = _k(t, t)
         k_vector = _concat(_k(t, T), _kd(t, T))
@@ -113,6 +123,8 @@ class ProbLSGaussianProcess:
     @cached_computation
     def Vd(self, t):
         """Posterior variance of function values and derivatives at t"""
+        if not isinstance(t, Tensor):
+            t = torch.as_tensor(t)
         T = self.ts_vec
         kd_tt = _kd(t, t)
         k_vector_1 = _concat(_k(t, T), _kd(t, T))
@@ -122,6 +134,8 @@ class ProbLSGaussianProcess:
     @cached_computation
     def dVd(self, t):
         """Posterior variance of derivatives at t"""
+        if not isinstance(t, Tensor):
+            t = torch.as_tensor(t)
         T = self.ts_vec
         dkd_tt = _dkd(t, t)
         k_vector = _concat(_dk(t, T), _dkd(t, T))
@@ -130,36 +144,48 @@ class ProbLSGaussianProcess:
     @cached_computation
     def V0f(self, t):
         """Posterior covariances of function values at t = 0 and t"""
+        if not isinstance(t, Tensor):
+            t = torch.as_tensor(t)
         T = self.ts_vec
-        k_0t = _k(0, t)
-        k_vector_1 = _concat(_k(0, T), _kd(0, T))
+        zero = torch.zeros(1)
+        k_0t = _k(zero, t)
+        k_vector_1 = _concat(_k(zero, T), _kd(zero, T))
         k_vector_2 = _concat(_k(t, T), _kd(t, T)).t()
         return k_0t - k_vector_1 @ self._solve_G(k_vector_2)
 
     @cached_computation
     def Vd0f(self, t):
         """Posterior covariance of gradient and function value at t = 0 and t resp."""
+        if not isinstance(t, Tensor):
+            t = torch.as_tensor(t)
         T = self.ts_vec
-        dk_0t = _dk(0, t)
-        k_vector_1 = _concat(_dk(0, T), _dkd(0, T))
+        zero = torch.zeros(1)
+        dk_0t = _dk(zero, t)
+        k_vector_1 = _concat(_dk(zero, T), _dkd(zero, T))
         k_vector_2 = _concat(_k(t, T), _kd(t, T)).t()
         return dk_0t - k_vector_1 @ self._solve_G(k_vector_2)
 
     @cached_computation
     def V0df(self, t):
         """Posterior covariance of function value and gradient at t = 0 and t resp."""
+        if not isinstance(t, Tensor):
+            t = torch.as_tensor(t)
         T = self.ts_vec
-        kd_0t = _kd(0, t)
-        k_vector_1 = _concat(_k(0, T), _kd(0, T))
+        zero = torch.zeros(1)
+        kd_0t = _kd(zero, t)
+        k_vector_1 = _concat(_k(zero, T), _kd(zero, T))
         k_vector_2 = _concat(_dk(t, T), _dkd(t, T)).t()
         return kd_0t - k_vector_1 @ self._solve_G(k_vector_2)
 
     @cached_computation
     def Vd0df(self, t):
         """Same as _V0f() but for gradients"""
+        if not isinstance(t, Tensor):
+            t = torch.as_tensor(t)
         T = self.ts_vec
-        dkd_0t = _dkd(0, t)
-        k_vector_1 = _concat(_dk(0, T), _dkd(0, T))
+        zero = torch.zeros(1)
+        dkd_0t = _dkd(zero, t)
+        k_vector_1 = _concat(_dk(zero, T), _dkd(zero, T))
         k_vector_2 = _concat(_dk(t, T), _dkd(t, T)).t()
         return dkd_0t - k_vector_1 @ self._solve_G(k_vector_2)
 
@@ -172,63 +198,32 @@ def _concat(a: Tensor, b: Tensor):
     return torch.cat((a, b), dim=1)
 
 
-@cache
 def _k(a, b):
-    if not isinstance(a, Tensor):
-        a = torch.as_tensor(a)
-    if not isinstance(b, Tensor):
-        b = torch.as_tensor(b)
     c = torch.minimum(a + OFFSET, b + OFFSET)
     return (c**3) / 3 + 0.5 * torch.abs(a - b) * (c**2)
 
 
-@cache
 def _kd(a, b):
-    if not isinstance(a, Tensor):
-        a = torch.as_tensor(a)
-    if not isinstance(b, Tensor):
-        b = torch.as_tensor(b)
     aa = a + OFFSET
     bb = b + OFFSET
     return ((a < b) * 0.5 * aa**2) + ((a >= b) * aa * bb - 0.5 * (bb**2))
 
 
-@cache
 def _dk(a, b):
     return _kd(b, a)
 
 
-@cache
 def _dkd(a, b):
-    if not isinstance(a, Tensor):
-        a = torch.as_tensor(a)
-    if not isinstance(b, Tensor):
-        b = torch.as_tensor(b)
     return torch.minimum(a + OFFSET, b + OFFSET)
 
 
-@cache
 def _ddk(a, b):
-    if not isinstance(a, Tensor):
-        a = torch.as_tensor(a)
-    if not isinstance(b, Tensor):
-        b = torch.as_tensor(b)
     return (a <= b) * (b - a)
 
 
-@cache
 def _ddkd(a, b):
-    if not isinstance(a, Tensor):
-        a = torch.as_tensor(a)
-    if not isinstance(b, Tensor):
-        b = torch.as_tensor(b)
     return (a <= b).float()
 
 
-@cache
 def _dddk(a, b):
-    if not isinstance(a, Tensor):
-        a = torch.as_tensor(a)
-    if not isinstance(b, Tensor):
-        b = torch.as_tensor(b)
     return -(a <= b).float()
