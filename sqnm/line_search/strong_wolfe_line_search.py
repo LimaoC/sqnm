@@ -9,8 +9,8 @@ logger = logging.getLogger(__name__)
 
 
 def strong_wolfe_line_search(
-    f: Callable[[Tensor], Tensor],
-    grad_f: Callable[[Tensor], Tensor],
+    fn: Callable[[Tensor], Tensor],
+    grad_fn: Callable[[Tensor], Tensor],
     xk: Tensor,
     pk: Tensor,
     a0: float = 1,
@@ -24,8 +24,8 @@ def strong_wolfe_line_search(
     Finds an optimal step size that satisfies strong Wolfe conditions.
 
     Parameters:
-        f: objective function, assumed to be bounded below along the direction p_k
-        grad_f: gradient of objective function
+        fn: objective function, assumed to be bounded below along the direction p_k
+        grad_fn: gradient of objective function
         xk: current iterate
         pk: direction, assumed to be a descent direction
         a0: initial step size (1 should always be used as the initial step size for
@@ -41,11 +41,11 @@ def strong_wolfe_line_search(
 
     @cache
     def phi(a_k: float) -> float:
-        return f(xk + a_k * pk).item()
+        return fn(xk + a_k * pk).item()
 
     @cache
     def grad_phi(a_k: float) -> float:
-        return grad_f(xk + a_k * pk).dot(pk).item()
+        return grad_fn(xk + a_k * pk).dot(pk).item()
 
     def zoom(a_lo: float, a_hi: float) -> float:
         """REF: Algorithm 3.6 in Numerical Optimization by Nocedal and Wright"""

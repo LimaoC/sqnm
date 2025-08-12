@@ -10,7 +10,7 @@ from typing import Callable
 import torch
 from torch import Tensor
 
-from ..line_search.strong_wolfe import strong_wolfe_line_search
+from ..line_search.strong_wolfe_line_search import strong_wolfe_line_search
 from .sqn_base import SQNBase
 
 logger = logging.getLogger(__name__)
