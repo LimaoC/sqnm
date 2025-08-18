@@ -19,6 +19,8 @@ class SQNBase(Optimizer):
     """Base for stochastic quasi-Newton (SQN) optimizers"""
 
     def __init__(self, params: ParamsT, defaults: dict[str, Any]):
+        if "lr" in defaults and defaults["lr"] <= 0:
+            raise ValueError("Learning rate must be positive")
         if not defaults.get("history_size"):
             raise ValueError("L-BFGS type optimizers must have a history size")
         if defaults["history_size"] < 1:
@@ -38,8 +40,7 @@ class SQNBase(Optimizer):
         state["num_iters"] = 0
         # Store the m most recent (s, y) pairs
         # s is the iterate difference, y is the gradient difference
-        m = defaults["history_size"]
-        state["sy_history"] = [(None, None) for _ in range(m)]
+        state["sy_history"] = [(None, None) for _ in range(defaults["history_size"])]
 
     def _get_grad_vector(self) -> Tensor:
         """Concatenates gradients from all parameters into a 1D tensor"""
@@ -68,8 +69,9 @@ class SQNBase(Optimizer):
         REF: Algorithm 7.4 in Numerical Optimization by Nocedal and Wright
         """
         group = self.param_groups[0]
-        state = self.state[self._params[0]]
         m = group["history_size"]
+
+        state = self.state[self._params[0]]
         k = state["num_iters"]
         sy_history = state["sy_history"]
 

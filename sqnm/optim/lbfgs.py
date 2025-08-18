@@ -20,32 +20,30 @@ class LBFGS(SQNBase):
     def __init__(
         self,
         params,
-        lr: float = 1,
+        lr: float = 1e-3,
+        line_search_fn: str | None = None,
         history_size: int = 20,
         grad_tol: float = 1e-4,
-        line_search_fn: str | None = None,
     ):
         """
         Limited-memory BFGS (L-BFGS)
 
         Parameters:
             params: iterable of parameters to optimize
-            lr: learning rate, only used if line_search_fn is None
-            history_size: history size, usually 2 <= m <= 30
-            grad_tol: termination tolerance for gradient norm
+            lr: learning rate, ignored if line_search_fn is not None
             line_search_fn: line search function to use, either None for fixed step
                 size, or "strong_wolfe" for strong Wolfe line search
+            history_size: history size, usually 2 <= m <= 30
+            grad_tol: termination tolerance for gradient norm
         """
-        if lr <= 0:
-            raise ValueError("L-BFGS learning rate must be positive")
         if line_search_fn is not None and line_search_fn != "strong_wolfe":
             raise ValueError("L-BFGS only supports strong Wolfe line search")
 
         defaults = dict(
             lr=lr,
+            line_search_fn=line_search_fn,
             history_size=history_size,
             grad_tol=grad_tol,
-            line_search_fn=line_search_fn,
         )
         super().__init__(params, defaults)
 
@@ -62,34 +60,35 @@ class LBFGS(SQNBase):
         """
         # Get state and hyperparameter variables
         group = self.param_groups[0]
-        state = self.state[self._params[0]]
         lr = group["lr"]
         m = group["history_size"]
         grad_tol = group["grad_tol"]
         line_search_fn = group["line_search_fn"]
+
+        state = self.state[self._params[0]]
         k = state["num_iters"]
         sy_history = state["sy_history"]
 
-        ################################################################################
-
         if line_search_fn == "strong_wolfe" and fn is None:
             raise ValueError("fn parameter is needed for strong Wolfe line search")
+
+        ################################################################################
 
         # Make sure the closure is always called with grad enabled
         closure = torch.enable_grad()(closure)
 
         orig_loss = closure()  # Populate gradients
         xk = self._get_param_vector()
-        grad = self._get_grad_vector()
+        gradk = self._get_grad_vector()
 
-        if grad.norm() < grad_tol:
+        if gradk.norm() < grad_tol:
             return orig_loss
 
         if k == 0:
-            pk = -grad  # Gradient descent for first iteration
+            pk = -gradk  # Gradient descent for first iteration
         else:
-            pk = -self._two_loop_recursion(grad)
-            if grad.dot(pk) >= 0:
+            pk = -self._two_loop_recursion(gradk)
+            if gradk.dot(pk) >= 0:
                 logger.warning("p_k is not a descent direction.")
 
         if line_search_fn == "strong_wolfe":
@@ -105,8 +104,8 @@ class LBFGS(SQNBase):
         # Compute and store next iterates
         self._set_param_vector(xk_next)
         closure()  # Recompute gradient after setting new param
-        grad_next = self._get_grad_vector()
-        sy_history[k % m] = (xk_next - xk, grad_next - grad)
+        gradk_next = self._get_grad_vector()
+        sy_history[k % m] = (xk_next - xk, gradk_next - gradk)
 
         state["num_iters"] += 1
         return orig_loss

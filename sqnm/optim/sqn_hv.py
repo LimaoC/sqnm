@@ -19,26 +19,35 @@ logger = logging.getLogger(__name__)
 
 
 class SQNHv(SQNBase):
+    LINE_SEARCH_FNS = ["strong_wolfe", "prob_wolfe"]
+
     def __init__(
         self,
         params,
-        history_size: int = 20,
-        grad_tol: float = 1e-4,
+        lr: float = 1e-3,
         line_search_fn: str | None = None,
+        history_size: int = 20,
         skip: int = 10,
-        beta: float = 1.0,
     ):
         """
         Hessian-Vector Stochastic Quasi-Newton (SQN-Hv)
+
+        Parameters:
+            params: iterable of parameters to optimize
+            lr: learning rate, ignored if line_search_fn is not None
+            line_search_fn: line search function to use, either None for fixed step
+                size, or one of OLBFGS.LINE_SEARCH_FNS
+            history_size: history size, usually 2 <= m <= 30
+            skip: number of iterations between curvature estimates
         """
-        if line_search_fn is not None and line_search_fn != "prob_wolfe":
-            raise ValueError("SQN-Hv only supports probabilistic Wolfe line search")
+        if line_search_fn is not None and line_search_fn not in self.LINE_SEARCH_FNS:
+            raise ValueError(f"SQN-Hv only supports one of: {self.LINE_SEARCH_FNS}")
+
         defaults = dict(
+            lr=lr,
             history_size=history_size,
-            grad_tol=grad_tol,
             line_search_fn=line_search_fn,
             skip=skip,
-            beta=beta,
         )
         super().__init__(params, defaults)
 
@@ -50,7 +59,7 @@ class SQNHv(SQNBase):
             torch.zeros_like(self._get_param_vector()),
         ]
         # Used for probabilistic LS
-        state["alpha_start"] = 0.1
+        state["alpha_start"] = 1.0
         state["alpha_running_avg"] = state["alpha_start"]
 
     def _two_loop_recursion(self, grad: Tensor) -> Tensor:
@@ -62,8 +71,9 @@ class SQNHv(SQNBase):
         stochastic gradient computations).
         """
         group = self.param_groups[0]
-        state = self.state[self._params[0]]
         m = group["history_size"]
+
+        state = self.state[self._params[0]]
         # The paper's t index is off by 1 compared to the convention, account for this
         # They define s_t = x_t - x_{t-1} instead of s_{t-1} = x_t - x_{t-1}
         t = state["num_curvature_iters"] - 1
@@ -105,12 +115,12 @@ class SQNHv(SQNBase):
         """
         # Get state and hyperparameter variables
         group = self.param_groups[0]
-        state = self.state[self._params[0]]
         m = group["history_size"]
-        grad_tol = group["grad_tol"]
+        lr = group["lr"]
         line_search_fn = group["line_search_fn"]
         skip = group["skip"]  # L
-        beta = group["beta"]
+
+        state = self.state[self._params[0]]
         k = state["num_iters"]
         sy_history = state["sy_history"]
         # Note index t for curvature pairs, which are deocupled from gradient estimates
@@ -118,26 +128,24 @@ class SQNHv(SQNBase):
         alpha_start = state["alpha_start"]
         alpha_running_avg = state["alpha_running_avg"]
 
-        ################################################################################
-
-        if line_search_fn == "prob_wolfe" and fn is None:
-            raise ValueError("fn parameter is needed for prob Wolfe line search")
-
-        # Make sure the closure is always called with grad enabled
-        closure = torch.enable_grad()(closure)
+        if line_search_fn is not None and fn is None:
+            raise ValueError("fn parameter is needed for line search")
 
         if k % skip != 0 and curvature_fn is not None:
             logger.warning(f"Got curvature_fn but didn't expect it on iteration {k}")
         if k % skip == 0 and curvature_fn is None:
             raise TypeError(f"Expected curvature_fn but didn't get it on iteration {k}")
 
+        ################################################################################
+
+        # Make sure the closure is always called with grad enabled
+        closure = torch.enable_grad()(closure)
+
         orig_loss = closure()  # Populate gradients
         xk = self._get_param_vector()
         grad = self._get_grad_vector()
 
-        # TODO: Replace this with a more robust criterion, stochastic gradient is noisy
-        if grad.norm() < grad_tol:
-            return orig_loss
+        # NOTE: Termination criterion?
 
         # Accumulate average over L iterations
         xt[1] += xk
@@ -146,30 +154,29 @@ class SQNHv(SQNBase):
             # Stochastic gradient descent for first 2L iterations
             pk = -grad
         else:
-            # NOTE: Is it possible to check if pk is a descent direction here?
-            # NOTE: Stochastic gradient isn't reliable
+            # NOTE: Can't reliably check if pk is a descent direction here
             pk = -self._two_loop_recursion(grad)
 
         if line_search_fn == "prob_wolfe":
             assert fn is not None
-
             f0, df0, var_f0, var_df0 = fn(xk, True)
+            # Don't need function handle to return vars in line search
             alpha_k, alpha_start, alpha_running_avg = prob_line_search(
-                lambda x: fn(x, False),  # don't need to return vars in prob ls
+                lambda x: fn(x, False),
                 xk,
                 pk,
                 f0,
                 df0,
                 var_f0,
                 var_df0,
-                alpha_start,
                 alpha_running_avg,
+                a0=alpha_start,
             )
-            # Update alpha_start and alpha_running_avg for next iteration
             state["alpha_start"] = alpha_start
-            state["alpha_running_avg"] = alpha_running_avg
+            state["running_avg"] = alpha_running_avg
         else:
-            alpha_k = beta / k
+            # Use fixed step size
+            alpha_k = lr
 
         xk_next = xk + alpha_k * pk
         self._set_param_vector(xk_next)
@@ -183,7 +190,7 @@ class SQNHv(SQNBase):
                 st = xt[1] - xt[0]
                 # Compute subsampled Hessian vector product on a different, larger
                 # sample given by curvature_fn
-                out, yt = hvp(curvature_fn, xt[1], v=st, strict=True)
+                _, yt = hvp(curvature_fn, xt[1], v=st, strict=True)
                 sy_history[(t - 1) % m] = (st, yt)
             xt[0], xt[1] = xt[1], torch.zeros_like(xt[1])
 
