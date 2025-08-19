@@ -88,12 +88,7 @@ def strong_wolfe_line_search(
                 # Maintain condition (b)
                 a_lo = a_j
 
-        if z_iters == zoom_max_iters:
-            logger.warning(
-                "zoom() returning without satisfying strong Wolfe conditions, "
-                "defaulting to alpha0 step size."
-            )
-            return a0
+        # NOTE: Returning here without satisfying strong Wolfe conditions
         return a_j
 
     a_prev = 0.0
