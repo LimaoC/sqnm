@@ -105,7 +105,8 @@ class LBFGS(SQNBase):
         self._set_param_vector(xk_next)
         closure()  # Recompute gradient after setting new param
         gradk_next = self._get_grad_vector()
-        sy_history[k % m] = (xk_next - xk, gradk_next - gradk)
+        sy_history[state["num_sy_pairs"] % m] = (xk_next - xk, gradk_next - gradk)
+        state["num_sy_pairs"] += 1
 
         state["num_iters"] += 1
         return orig_loss

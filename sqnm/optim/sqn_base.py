@@ -41,6 +41,7 @@ class SQNBase(Optimizer):
         # Store the m most recent (s, y) pairs
         # s is the iterate difference, y is the gradient difference
         state["sy_history"] = [(None, None) for _ in range(defaults["history_size"])]
+        state["num_sy_pairs"] = 0  # Also the next index to insert into
 
     def _get_grad_vector(self) -> Tensor:
         """Concatenates gradients from all parameters into a 1D tensor"""
@@ -72,7 +73,7 @@ class SQNBase(Optimizer):
         m = group["history_size"]
 
         state = self.state[self._params[0]]
-        k = state["num_iters"]
+        k = state["num_sy_pairs"]
         sy_history = state["sy_history"]
 
         q = grad.clone()

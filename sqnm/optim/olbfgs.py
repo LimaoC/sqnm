@@ -161,7 +161,8 @@ class OLBFGS(SQNBase):
 
         sk = alpha_k * pk
         yk = gradk_next - gradk + reg_term * sk
-        sy_history[k % m] = (sk, yk)
+        sy_history[state["num_sy_pairs"] % m] = (sk, yk)
+        state["num_sy_pairs"] += 1
 
         state["num_iters"] += 1
         return orig_loss
