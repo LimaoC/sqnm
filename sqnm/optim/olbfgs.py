@@ -28,7 +28,7 @@ class OLBFGS(SQNBase):
         line_search_fn: str | None = None,
         history_size: int = 20,
         reg_term: float = 0.0,
-        step_size_weight: float = 1.0,
+        c: float = 1.0,
     ):
         """
         Online limited-memory BFGS (oL-BFGS)
@@ -40,7 +40,7 @@ class OLBFGS(SQNBase):
                 size, or one of OLBFGS.LINE_SEARCH_FNS
             history_size: history size, usually 2 <= m <= 30
             reg_term: regularisation parameter in gradient difference term
-            step_size_weight: step size scaling factor
+            c: step size scaling factor
         """
         if line_search_fn is not None and line_search_fn not in self.LINE_SEARCH_FNS:
             raise ValueError(f"o-LBFGS only supports one of: {self.LINE_SEARCH_FNS}")
@@ -50,7 +50,7 @@ class OLBFGS(SQNBase):
             line_search_fn=line_search_fn,
             history_size=history_size,
             reg_term=reg_term,
-            step_size_weight=step_size_weight,
+            c=c,
         )
         super().__init__(params, defaults)
 
@@ -65,7 +65,7 @@ class OLBFGS(SQNBase):
         group = self.param_groups[0]
         line_search_fn = group["line_search_fn"]
         m = group["history_size"]
-        c = group["step_size_weight"]
+        c = group["c"]
 
         state = self.state[self._params[0]]
         k = state["num_iters"]
@@ -82,7 +82,7 @@ class OLBFGS(SQNBase):
             q -= alphas[i - (k - m)] * y_prev
             const += s_prev.dot(y_prev) / y_prev.dot(y_prev)
         if line_search_fn is None:
-            alphas[-1] *= c  # Scale alpha_{k-1} by step_size_weight
+            alphas[-1] *= c  # Scale alpha_{k-1} by c
         r = const / min(k, m) * q
         for i in history_idxs:
             s_prev, y_prev = sy_history[i % m]
@@ -112,7 +112,7 @@ class OLBFGS(SQNBase):
         line_search_fn = group["line_search_fn"]
         m = group["history_size"]
         reg_term = group["reg_term"]
-        c = group["step_size_weight"]
+        c = group["c"]
 
         state = self.state[self._params[0]]
         k = state["num_iters"]
