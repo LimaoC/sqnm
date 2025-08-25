@@ -29,16 +29,16 @@ class SCBFGS(SQNBase):
         history_size: int = 20,
         stable: bool = True,
         eta1: float = 1 / 4,
-        eta2: float = 2,
-        rho: float = 1 / 2,
+        eta2: float = 4,
+        rho: float = 1 / 8,
         tau: float = 8,
     ):
         if line_search_fn is not None and line_search_fn not in self.LINE_SEARCH_FNS:
             raise ValueError(f"SC-BFGS only supports one of: {self.LINE_SEARCH_FNS}")
         if eta1 <= 0 or eta1 >= 1:
             raise ValueError("eta1 should be in the range (0, 1)")
-        if eta2 <= 1:
-            raise ValueError("eta2 should be in the range (1, inf)")
+        if eta2 < 1:
+            raise ValueError("eta2 should be in the range [1, inf)")
 
         defaults = dict(
             lr=lr,
@@ -56,19 +56,6 @@ class SCBFGS(SQNBase):
         state["num_proxy_funcs"] = 0
 
     def _compute_beta(self, sk, yk) -> float:
-        """
-        // increasing beta will eventually satisfy (1)
-
-        b_lower = 0
-        yk = ak * vk
-        if sk.T * yk < eta1 * ||sk||^2 // (1) not satisfied for b_lower = 0
-            b_lower = ...
-        // (1) satisfied for b_lower, provided it is positive
-        if b_lower < 0
-
-        b_lower: smallest beta s.t. (1) is satisfied
-        b_upper: largest beta s.t. (2) is satisfied
-        """
         group = self.param_groups[0]
         eta1 = group["eta1"]
         eta2 = group["eta2"]
