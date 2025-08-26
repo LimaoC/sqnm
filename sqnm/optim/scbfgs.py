@@ -76,7 +76,7 @@ class SCBFGS(SQNBase):
             a = sksk - 2 * skyk + ykyk
             b = 2 * skyk - 2 * ykyk - eta2 * sksk + eta2 * skyk
             c = ykyk - eta2 * skyk
-            beta_upper = min(np.roots([c, b, a]))
+            beta_upper = np.min(np.roots([c, b, a]))
 
         return max(beta_lower, beta_upper)
 
@@ -93,7 +93,7 @@ class SCBFGS(SQNBase):
         return rho * norm_sq <= -proxy_gradk.dot(pk) and pk.dot(pk) <= tau * norm_sq
 
     @torch.no_grad()
-    def step(
+    def step(  # type: ignore[override]
         self,
         closure: Callable[[], float],
         proxy_fn: Callable[[Tensor], Tensor],

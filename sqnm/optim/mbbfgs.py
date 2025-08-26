@@ -38,7 +38,7 @@ class MBBFGS(SQNBase):
         super().__init__(params, defaults)
 
     @torch.no_grad()
-    def step(
+    def step(  # type: ignore[override]
         self,
         closure: Callable[[], float],
         overlap_fn: Callable[[Tensor], Tensor],
