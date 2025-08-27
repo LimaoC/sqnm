@@ -10,7 +10,7 @@ from torch import Tensor
 from torch.optim import Optimizer
 from torch.optim.optimizer import ParamsT
 
-from ..utils.param import grad_vec
+from sqnm.utils.param import grad_vec
 
 logger = logging.getLogger(__name__)
 

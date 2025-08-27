@@ -12,9 +12,8 @@ import torch
 from torch import Tensor
 from torch.autograd.functional import hvp
 
-from ..line_search.prob_line_search import prob_line_search
-from ..line_search.strong_wolfe_line_search import strong_wolfe_line_search
-from .sqn_base import SQNBase
+from sqnm.line_search import prob_line_search, strong_wolfe_line_search
+from sqnm.optim.sqn_base import SQNBase
 
 logger = logging.getLogger(__name__)
 
