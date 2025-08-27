@@ -59,6 +59,10 @@ def strong_wolfe_line_search(
         z_iters = 0
         while z_iters < zoom_max_iters:
             z_iters += 1
+            if a_lo == a_hi:
+                # Failsafe, break here
+                a_j = a_lo
+                break
             # Interpolate to find a trial step size a_j in (a_lo, a_hi)
             a_j = _cubic_interp(
                 a_lo,
