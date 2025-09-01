@@ -76,7 +76,7 @@ class SCBFGS(SQNBase):
             a = (sksk - 2 * skyk + ykyk).item()
             b = (2 * skyk - 2 * ykyk - eta2 * sksk + eta2 * skyk).item()
             c = (ykyk - eta2 * skyk).item()
-            beta_upper = np.min(np.roots([c, b, a]))
+            beta_upper = np.min(np.roots([a, b, c]))
 
         return max(beta_lower, beta_upper)
 
@@ -155,7 +155,6 @@ class SCBFGS(SQNBase):
                     # If we haven't reached the max number of evals, try again with a
                     # different batch, else continue
                     if state["num_proxy_funcs"] < 2:
-                        state["num_iters"] += 1
                         return orig_loss
 
         if line_search_fn == "strong_wolfe":
