@@ -6,7 +6,7 @@ REF: Schraudolph, N. N., Yu, J., & Günter, S. (2007). A Stochastic Quasi-Newton
 """
 
 import logging
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 import torch
 from torch import Tensor
@@ -93,7 +93,7 @@ class OLBFGS(SQNBase):
     def step(  # type: ignore[override]
         self,
         closure: Callable[[], float],
-        fn: Callable[[Tensor, bool], Any] | None = None,
+        fn: Callable[[Tensor], Tensor] | Callable[[Tensor, bool], Any] | None = None,
     ) -> float:
         """
         Perform a single oL-BFGS iteration.
@@ -139,14 +139,16 @@ class OLBFGS(SQNBase):
 
         if line_search_fn == "strong_wolfe":
             assert fn is not None
+            fn = cast(Callable[[Tensor], Tensor], fn)
             # Choose step size to satisfy strong Wolfe conditions
             grad_fn = torch.func.grad(fn)
             alpha_k = strong_wolfe_line_search(fn, grad_fn, xk, pk)
         elif line_search_fn == "prob_wolfe":
             assert fn is not None
+            fn = cast(Callable[[Tensor, bool], Any], fn)
             f0, df0, var_f0, var_df0 = fn(xk, True)
             # Don't need function handle to return variances in line search
-            alpha_k = prob_line_search(
+            alpha_k, _, _ = prob_line_search(
                 lambda x: fn(x, False), xk, pk, f0, df0, var_f0, var_df0
             )
         else:

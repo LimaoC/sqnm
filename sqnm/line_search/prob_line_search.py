@@ -54,10 +54,11 @@ def prob_line_search(
     df0: Tensor,  # [d]
     var_f0: float,  # float
     var_df0: Tensor,  # [d]
+    a_running_avg: float | None = None,
     a0: float = 1.0,  # QN methods should try a step size of 1.0 first
-    L: int = 20,  # max number of function evaluations
+    L: int = 10,  # max number of function evaluations
     wolfe_threshold: float = 0.3,
-):
+) -> tuple[float, float, float]:
     grad_fn = torch.func.grad(fn)
 
     # Scaling and noise level of GP
@@ -67,7 +68,7 @@ def prob_line_search(
 
     gp = ProbLSGaussianProcess(sigma_f, sigma_df)
     tt_ext = 1.0  # Scaled step size for extrapolation
-    tt = 1.0  # Scaled position of first function evaluation
+    tt = 1.0  # Scaled step size of first function evaluation (actual is tt * a0)
 
     gp.add(0.0, 0.0, (df0 @ dir) / beta)
 
@@ -76,7 +77,7 @@ def prob_line_search(
         y, dy = _evaluate_objective(fn, grad_fn, f0, tt, x0, a0, dir, beta)
         gp.add(tt, y, dy)
         if _prob_wolfe(tt, gp) > wolfe_threshold:
-            return tt
+            return _rescale_output(a0, tt, a_running_avg)
 
         # Find suitable candidates for next evaluation
         ms = [gp.mu(t) for t in gp.ts]
@@ -90,7 +91,7 @@ def prob_line_search(
             # Stop here - though Wolfe conditions may not be guaranteed
             y = gp.ys[min_m_idx]
             dy = gp.dys[min_m_idx]
-            return tt
+            return _rescale_output(a0, tt, a_running_avg)
 
         # Sort both gp.ts and ms, according to sort order for gp.ts
         ts_sorted, ms_sorted = zip(*sorted(zip(gp.ts, ms)))
@@ -118,7 +119,7 @@ def prob_line_search(
                     ss_cand.append(torch.sqrt(gp.V(tt_cub_min)))  # NOTE: Take sqrt here
             elif n == 0 and gp.d1mu(0) > 0:
                 tt = 0.01 * (ts_sorted[n] + ts_sorted[n + 1])
-                return tt
+                return _rescale_output(a0, tt, a_running_avg)
 
             # Check if an old step size is now acceptable
             if n > 0 and _prob_wolfe(ts_sorted[n], gp) > wolfe_threshold:
@@ -129,9 +130,9 @@ def prob_line_search(
         # with preference for the current step size tt
         if len(ts_wolfe) > 0:
             if tt in ts_wolfe:
-                return tt
+                return _rescale_output(a0, tt, a_running_avg)
             tt = ts_wolfe[np.argmin(ms_wolfe)]
-            return tt
+            return _rescale_output(a0, tt, a_running_avg)
 
         tt_next = max(gp.ts) + tt_ext
         ts_cand.append(tt_next)
@@ -152,16 +153,31 @@ def prob_line_search(
     y, dy = _evaluate_objective(fn, grad_fn, f0, tt, x0, a0, dir, beta)
     gp.add(tt, y, dy)
     if _prob_wolfe(tt, gp) > wolfe_threshold:
-        return tt
+        return _rescale_output(a0, tt, a_running_avg)
 
     # Otherwise - return point with lowest GP mean
     ms = [gp.mu(t) for t in gp.ts[1:]]
-    t_lowest = gp.ts[np.argmin(ms) + 1]
-    logger.warning(
-        "prob_line_search() returning without an acceptable point, "
-        f"defaulting to step size with lowest GP mean ({t_lowest:.4f})."
-    )
-    return t_lowest
+    tt = gp.ts[np.argmin(ms) + 1]
+    return _rescale_output(a0, tt, a_running_avg)
+
+
+def _rescale_output(a0, tt, a_running_avg) -> tuple[float, float, float]:
+    a_accepted = tt * a0
+    if a_running_avg is None:
+        return float(a_accepted), -1, -1
+
+    a_ext = 1.3
+    theta_reset = 100
+    gamma = 0.95
+
+    a_running_avg = gamma * a_running_avg + (1 - gamma) * a_accepted
+    a_next = a_accepted * a_ext
+
+    # Reset scaling if new GP scaling is drastically different from previous scalings
+    if (a_next < a_running_avg / theta_reset) or (a_next > a_running_avg * theta_reset):
+        a_next = a_running_avg
+
+    return float(a_accepted), float(a_next), float(a_running_avg)
 
 
 @cache

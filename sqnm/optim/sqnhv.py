@@ -6,7 +6,7 @@ REF: Byrd, R. H., Hansen, S. L., Nocedal, J., & Singer, Y. (2015). A Stochastic
 """
 
 import logging
-from typing import Callable
+from typing import Any, Callable, cast
 
 import torch
 from torch import Tensor
@@ -97,7 +97,7 @@ class SQNHv(SQNBase):
     def step(  # type: ignore[override]
         self,
         closure: Callable[[], float],
-        fn: Callable[[Tensor, bool], Tensor] | None = None,
+        fn: Callable[[Tensor], Tensor] | Callable[[Tensor, bool], Any] | None = None,
         curvature_fn: Callable[[Tensor], Tensor] | None = None,
     ) -> float:
         """
@@ -158,26 +158,35 @@ class SQNHv(SQNBase):
 
         if line_search_fn == "strong_wolfe":
             assert fn is not None
+            fn = cast(Callable[[Tensor], Tensor], fn)
             # Choose step size to satisfy strong Wolfe conditions
             grad_fn = torch.func.grad(fn)
             alpha_k = strong_wolfe_line_search(fn, grad_fn, xk, pk)
         elif line_search_fn == "prob_wolfe":
             assert fn is not None
+            fn = cast(Callable[[Tensor, bool], Any], fn)
             f0, df0, var_f0, var_df0 = fn(xk, True)
             # Don't need function handle to return vars in line search
-            alpha_k, alpha_start, alpha_running_avg = prob_line_search(
-                lambda x: fn(x, False),
-                xk,
-                pk,
-                f0,
-                df0,
-                var_f0,
-                var_df0,
-                alpha_running_avg,
-                a0=alpha_start,
-            )
-            state["alpha_start"] = alpha_start
-            state["running_avg"] = alpha_running_avg
+            if k <= 2 * skip:
+                # Propagate step sizes in probabilistic ls - we don't have curvature
+                # information yet
+                alpha_k, alpha_start, alpha_running_avg = prob_line_search(
+                    lambda x: fn(x, False),
+                    xk,
+                    pk,
+                    f0,
+                    df0,
+                    var_f0,
+                    var_df0,
+                    a_running_avg=alpha_running_avg,
+                    a0=alpha_start,
+                )
+                state["alpha_start"] = alpha_start
+                state["running_avg"] = alpha_running_avg
+            else:
+                alpha_k, _, _ = prob_line_search(
+                    lambda x: fn(x, False), xk, pk, f0, df0, var_f0, var_df0
+                )
         else:
             # Use fixed step size
             alpha_k = lr

@@ -6,19 +6,19 @@ Berahas, A. S., Nocedal, J., & Takáč, M. (2016). A Multi-Batch L-BFGS Method f
 """
 
 import logging
-from typing import Callable
+from typing import Any, Callable, cast
 
 import torch
 from torch import Tensor
 
-from sqnm.line_search import strong_wolfe_line_search
+from sqnm.line_search import prob_line_search, strong_wolfe_line_search
 from sqnm.optim.sqn_base import SQNBase
 
 logger = logging.getLogger(__name__)
 
 
 class MBBFGS(SQNBase):
-    LINE_SEARCH_FNS = ["strong_wolfe"]
+    LINE_SEARCH_FNS = ["strong_wolfe", "prob_wolfe"]
 
     def __init__(
         self,
@@ -42,7 +42,7 @@ class MBBFGS(SQNBase):
         self,
         closure: Callable[[], float],
         overlap_fn: Callable[[Tensor], Tensor],
-        fn: Callable[[Tensor], Tensor] | None = None,
+        fn: Callable[[Tensor], Tensor] | Callable[[Tensor, bool], Any] | None = None,
     ):
         # Get state and hyperparameter variables
         group = self.param_groups[0]
@@ -76,12 +76,18 @@ class MBBFGS(SQNBase):
 
         if line_search_fn == "strong_wolfe":
             assert fn is not None
+            fn = cast(Callable[[Tensor], Tensor], fn)
             # Choose step size to satisfy strong Wolfe conditions
             grad_fn = torch.func.grad(fn)
             alpha_k = strong_wolfe_line_search(fn, grad_fn, xk, pk)
         elif line_search_fn == "prob_wolfe":
-            # TODO:
-            pass
+            assert fn is not None
+            fn = cast(Callable[[Tensor, bool], Any], fn)
+            f0, df0, var_f0, var_df0 = fn(xk, True)
+            # Don't need function handle to return variances in line search
+            alpha_k, _, _ = prob_line_search(
+                lambda x: fn(x, False), xk, pk, f0, df0, var_f0, var_df0
+            )
         else:
             # Use fixed step size
             alpha_k = lr
