@@ -68,25 +68,23 @@ class OLBFGS(SQNBase):
 
         state = self.state[self._params[0]]
         k = state["num_iters"]
-        sy_history = state["sy_history"]
+        h = min(k, m)  # Number of curvature pairs to use
+        idxs = torch.arange(k - h, k) % m
+        s = state["s_hist"][idxs]  # [h, d]
+        y = state["y_hist"][idxs]  # [h, d]
 
         q = grad.clone()
-        alphas = torch.zeros(m)
-        s_prev, y_prev = sy_history[(k - 1) % m]
-        history_idxs = range(max(k - m, 0), k)
-        const = 0
-        for i in reversed(history_idxs):
-            s_prev, y_prev = sy_history[i % m]
-            alphas[i - (k - m)] = s_prev.dot(q) / s_prev.dot(y_prev)
-            q -= alphas[i - (k - m)] * y_prev
-            const += s_prev.dot(y_prev) / y_prev.dot(y_prev)
+        sy = torch.sum(s * y, dim=1)  # [h], precompute s.dot(y) for each pair
+        alphas = torch.zeros(h, device=grad.device)
+        for i in reversed(range(h)):
+            alphas[i] = s[i].dot(q) / sy[i]
+            q -= alphas[i] * y[i]
         if line_search_fn is None:
             alphas[-1] *= c  # Scale alpha_{k-1} by c
-        r = const / min(k, m) * q
-        for i in history_idxs:
-            s_prev, y_prev = sy_history[i % m]
-            beta = y_prev.dot(r) / s_prev.dot(y_prev)
-            r += (alphas[i - (k - m)] - beta) * s_prev
+        r = (torch.sum(sy / torch.sum(y * y, dim=1)) / h) * q
+        for i in range(h):
+            beta = y[i].dot(r) / sy[i]
+            r += (alphas[i] - beta) * s[i]
         return r
 
     @torch.no_grad()
@@ -115,7 +113,8 @@ class OLBFGS(SQNBase):
 
         state = self.state[self._params[0]]
         k = state["num_iters"]
-        sy_history = state["sy_history"]
+        s_hist = state["s_hist"]
+        y_hist = state["y_hist"]
 
         if line_search_fn is not None and fn is None:
             raise ValueError("fn parameter is needed for line search")
@@ -162,7 +161,8 @@ class OLBFGS(SQNBase):
 
         sk = alpha_k * pk
         yk = gradk_next - gradk + reg_term * sk
-        sy_history[state["num_sy_pairs"] % m] = (sk, yk)
+        s_hist[state["num_sy_pairs"] % m] = sk
+        y_hist[state["num_sy_pairs"] % m] = yk
         state["num_sy_pairs"] += 1
 
         state["num_iters"] += 1

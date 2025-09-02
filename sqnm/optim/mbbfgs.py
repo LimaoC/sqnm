@@ -52,7 +52,8 @@ class MBBFGS(SQNBase):
 
         state = self.state[self._params[0]]
         k = state["num_iters"]
-        sy_history = state["sy_history"]
+        s_hist = state["s_hist"]
+        y_hist = state["y_hist"]
 
         if line_search_fn is not None and fn is None:
             raise ValueError("fn parameter is needed for line search")
@@ -98,7 +99,8 @@ class MBBFGS(SQNBase):
         sk = alpha_k * pk
         grad_overlap_fn = torch.func.grad(overlap_fn)
         yk = grad_overlap_fn(xk_next) - grad_overlap_fn(xk)
-        sy_history[state["num_sy_pairs"] % m] = (sk, yk)
+        s_hist[state["num_sy_pairs"] % m] = sk
+        y_hist[state["num_sy_pairs"] % m] = yk
         state["num_sy_pairs"] += 1
 
         state["num_iters"] += 1

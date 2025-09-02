@@ -40,7 +40,10 @@ class SQNBase(Optimizer):
         state["num_iters"] = 0
         # Store the m most recent (s, y) pairs
         # s is the iterate difference, y is the gradient difference
-        state["sy_history"] = [(None, None) for _ in range(defaults["history_size"])]
+        m = defaults["history_size"]
+        param = self._get_param_vector()
+        state["s_hist"] = torch.zeros(m, param.numel(), device=param.device)
+        state["y_hist"] = torch.zeros(m, param.numel(), device=param.device)
         state["num_sy_pairs"] = 0  # Also the next index to insert into
 
     def _get_grad_vector(self) -> Tensor:
@@ -74,19 +77,19 @@ class SQNBase(Optimizer):
 
         state = self.state[self._params[0]]
         k = state["num_sy_pairs"]
-        sy_history = state["sy_history"]
+        h = min(k, m)  # Number of curvature pairs to use
+        idxs = torch.arange(k - h, k) % m
+        s = state["s_hist"][idxs]  # [h, d]
+        y = state["y_hist"][idxs]  # [h, d]
 
         q = grad.clone()
-        alphas = torch.zeros(m)
-        s_prev, y_prev = sy_history[(k - 1) % m]
-        history_idxs = range(max(k - m, 0), k)
-        for i in reversed(history_idxs):
-            s_prev, y_prev = sy_history[i % m]
-            alphas[i - (k - m)] = s_prev.dot(q) / s_prev.dot(y_prev)
-            q -= alphas[i - (k - m)] * y_prev
-        r = (s_prev.dot(y_prev) / y_prev.dot(y_prev)) * q
-        for i in history_idxs:
-            s_prev, y_prev = sy_history[i % m]
-            beta = y_prev.dot(r) / s_prev.dot(y_prev)
-            r += (alphas[i - (k - m)] - beta) * s_prev
+        sy = torch.sum(s * y, dim=1)  # [h], precompute s.dot(y) for each pair
+        alphas = torch.zeros(h, device=grad.device)
+        for i in reversed(range(h)):
+            alphas[i] = s[i].dot(q) / sy[i]
+            q -= alphas[i] * y[i]
+        r = (sy[0] / (y[0].dot(y[0]))) * q
+        for i in range(h):
+            beta = y[i].dot(r) / sy[i]
+            r += (alphas[i] - beta) * s[i]
         return r

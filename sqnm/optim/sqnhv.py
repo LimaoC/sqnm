@@ -76,21 +76,21 @@ class SQNHv(SQNBase):
         # The paper's t index is off by 1 compared to the convention, account for this
         # They define s_t = x_t - x_{t-1} instead of s_{t-1} = x_t - x_{t-1}
         t = state["num_sy_pairs"] - 1
-        sy_history = state["sy_history"]
+        h = min(t, m)  # Number of curvature pairs to use
+        idxs = torch.arange(t - h, t) % m
+        s = state["s_hist"][idxs]  # [h, d]
+        y = state["y_hist"][idxs]  # [h, d]
 
         q = grad.clone()
-        alphas = torch.zeros(m)
-        s_prev, y_prev = sy_history[t % m]
-        history_idxs = range(max(t - m, 0), t)
-        for i in reversed(history_idxs):
-            s_prev, y_prev = sy_history[i % m]
-            alphas[i - (t - m)] = s_prev.dot(q) / s_prev.dot(y_prev)
-            q -= alphas[i - (t - m)] * y_prev
-        r = (s_prev.dot(y_prev) / y_prev.dot(y_prev)) * q
-        for i in history_idxs:
-            s_prev, y_prev = sy_history[i % m]
-            beta = y_prev.dot(r) / s_prev.dot(y_prev)
-            r += (alphas[i - (t - m)] - beta) * s_prev
+        sy = torch.sum(s * y, dim=1)  # [h], precompute s.dot(y) for each pair
+        alphas = torch.zeros(h, device=grad.device)
+        for i in reversed(range(h)):
+            alphas[i] = s[i].dot(q) / sy[i]
+            q -= alphas[i] * y[i]
+        r = (sy[0] / (y[0].dot(y[0]))) * q
+        for i in range(h):
+            beta = y[i].dot(r) / sy[i]
+            r += (alphas[i] - beta) * s[i]
         return r
 
     @torch.no_grad()
@@ -121,7 +121,8 @@ class SQNHv(SQNBase):
 
         state = self.state[self._params[0]]
         k = state["num_iters"]
-        sy_history = state["sy_history"]
+        s_hist = state["s_hist"]
+        y_hist = state["y_hist"]
         # Note index t for curvature pairs, which are decoupled from gradient estimates
         xt = state["xt"]
         alpha_start = state["alpha_start"]
@@ -203,7 +204,8 @@ class SQNHv(SQNBase):
                 # Compute subsampled Hessian vector product on a different, larger
                 # sample given by curvature_fn
                 _, yt = hvp(curvature_fn, xt[1], v=st, strict=True)
-                sy_history[t % m] = (st, yt)
+                s_hist[t % m] = st
+                y_hist[t % m] = yt
             xt[0], xt[1] = xt[1], torch.zeros_like(xt[1])
             state["num_sy_pairs"] += 1
 

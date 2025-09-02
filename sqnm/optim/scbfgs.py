@@ -108,7 +108,9 @@ class SCBFGS(SQNBase):
 
         state = self.state[self._params[0]]
         k = state["num_iters"]
-        sy_history = state["sy_history"]
+        # sy_history = state["sy_history"]
+        s_hist = state["s_hist"]
+        y_hist = state["y_hist"]
 
         if line_search_fn is not None and fn is None:
             raise ValueError("fn parameter is needed for line search")
@@ -130,12 +132,15 @@ class SCBFGS(SQNBase):
             # Store curvature pairs from previous iteration
             # Store (sk, yk) from previous iteration
             # sk computed already - need yk using this iteration's stochastic gradient
+            sk = s_hist[state["num_sy_pairs"] % m]
             vk = gradk - state["gradk_prev"]
             yk_tmp = state["alpha_k_prev"] * vk
-            betak = self._compute_beta(state["sk_prev"], yk_tmp)
-            yk = betak * state["sk_prev"] + (1 - betak) * yk_tmp
-            replaced_sy_pair = sy_history[state["num_sy_pairs"] % m]
-            sy_history[state["num_sy_pairs"] % m] = (state["sk_prev"], yk)
+            betak = self._compute_beta(sk, yk_tmp)
+            yk = betak * sk + (1 - betak) * yk_tmp
+            # Keep reference to the y we've replaced, in case we need to discard yk
+            y_tmp = y_hist[state["num_sy_pairs"] % m]
+            # Set new curvature pair (sk, yk)
+            y_hist[state["num_sy_pairs"] % m] = yk
             state["num_sy_pairs"] += 1
 
             # NOTE: Can't reliably check if pk is a descent direction here
@@ -151,7 +156,7 @@ class SCBFGS(SQNBase):
                 else:
                     # Not satisfied, discard this batch (undo curvature pair)
                     state["num_sy_pairs"] -= 1
-                    sy_history[state["num_sy_pairs"] % m] = replaced_sy_pair
+                    y_hist[state["num_sy_pairs"] % m] = y_tmp
                     # If we haven't reached the max number of evals, try again with a
                     # different batch, else continue
                     if state["num_proxy_funcs"] < 2:
@@ -180,7 +185,7 @@ class SCBFGS(SQNBase):
 
         # Can only compute sk now, need next batch to compute yk
         sk = alpha_k * pk
-        state["sk_prev"] = sk
+        s_hist[state["num_sy_pairs"] % m] = sk
         state["alpha_k_prev"] = alpha_k
         state["gradk_prev"] = gradk
 
