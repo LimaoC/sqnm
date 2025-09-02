@@ -17,8 +17,8 @@ def strong_wolfe_line_search(
     a_max: float = 100,
     c1: float = 1e-4,
     c2: float = 0.9,
-    max_iters: int = 200,
-    zoom_max_iters: int = 20,
+    max_iters: int = 10,
+    zoom_max_iters: int = 10,
 ) -> float:
     """
     Finds an optimal step size that satisfies strong Wolfe conditions.
