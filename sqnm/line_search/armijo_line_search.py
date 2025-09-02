@@ -37,11 +37,3 @@ def armijo_line_search(
     while fn(xk + a_curr * pk) > f_xk + c * a_curr * grad_f_xk_dot_pk:
         a_curr /= 2
     return a_curr
-
-    # fxk, grad_fxk = f(xk), grad_f(xk)
-    # dot_grad_fxk_pk = grad_fxk.dot(pk)
-    # alpha = alpha0
-    #
-    # while f(xk + alpha * pk) > fxk - alpha * beta1 * dot_grad_fxk_pk:
-    #     alpha /= 2
-    # return alpha
