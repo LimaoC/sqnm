@@ -167,7 +167,9 @@ class SCBFGS(SQNBase):
             fn = cast(Callable[[Tensor], Tensor], fn)
             # Choose step size to satisfy strong Wolfe conditions
             grad_fn = torch.func.grad(fn)
-            alpha_k = strong_wolfe_line_search(fn, grad_fn, xk, pk)
+            phi0 = orig_loss
+            grad_phi0 = gradk.dot(pk).item()
+            alpha_k = strong_wolfe_line_search(fn, grad_fn, xk, pk, phi0, grad_phi0)
         elif line_search_fn == "prob_wolfe":
             assert fn is not None
             fn = cast(Callable[[Tensor, bool], Any], fn)

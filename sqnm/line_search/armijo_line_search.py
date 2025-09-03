@@ -11,6 +11,8 @@ def armijo_line_search(
     grad_fn: Callable[[Tensor], Tensor],
     xk: Tensor,
     pk: Tensor,
+    f_xk: float,
+    grad_f_xk: float,
     a0: float = 1,
     c: float = 1e-4,
 ) -> float:
@@ -29,8 +31,6 @@ def armijo_line_search(
     REF: Algorithm 3.1 in Numerical Optimization by Nocedal and Wright
     """
 
-    f_xk = fn(xk)
-    grad_f_xk = grad_fn(xk)
     grad_f_xk_dot_pk = grad_f_xk.dot(pk)
     a_curr = a0
 

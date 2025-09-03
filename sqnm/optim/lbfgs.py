@@ -5,7 +5,7 @@ REF: Algorithm 7.5 in Numerical Optimization by Nocedal and Wright
 """
 
 import logging
-from typing import Callable
+from typing import Callable, cast
 
 import torch
 from torch import Tensor
@@ -93,9 +93,12 @@ class LBFGS(SQNBase):
 
         if line_search_fn == "strong_wolfe":
             assert fn is not None
+            fn = cast(Callable[[Tensor], Tensor], fn)
             # Choose step size to satisfy strong Wolfe conditions
             grad_fn = torch.func.grad(fn)
-            alpha_k = strong_wolfe_line_search(fn, grad_fn, xk, pk)
+            phi0 = orig_loss
+            grad_phi0 = gradk.dot(pk).item()
+            alpha_k = strong_wolfe_line_search(fn, grad_fn, xk, pk, phi0, grad_phi0)
             xk_next = xk + alpha_k * pk
         else:
             # Use fixed step size

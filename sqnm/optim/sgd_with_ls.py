@@ -42,7 +42,7 @@ class SGDWithLS(SGD):
 
         # Choose step size to satisfy Armijo conditions
         grad_fn = torch.func.grad(fn)
-        alpha_k = armijo_line_search(fn, grad_fn, xk, pk)
+        alpha_k = armijo_line_search(fn, grad_fn, xk, pk, orig_loss, gradk)
 
         # Assume 1 param group
         self.param_groups[0]["lr"] = alpha_k

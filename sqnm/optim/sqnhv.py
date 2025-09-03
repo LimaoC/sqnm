@@ -143,7 +143,7 @@ class SQNHv(SQNBase):
 
         orig_loss = closure()  # Populate gradients
         xk = self._get_param_vector()
-        grad = self._get_grad_vector()
+        gradk = self._get_grad_vector()
 
         # NOTE: Termination criterion?
 
@@ -152,17 +152,19 @@ class SQNHv(SQNBase):
 
         if k <= 2 * skip:
             # Stochastic gradient descent for first 2L iterations
-            pk = -grad
+            pk = -gradk
         else:
             # NOTE: Can't reliably check if pk is a descent direction here
-            pk = -self._two_loop_recursion(grad)
+            pk = -self._two_loop_recursion(gradk)
 
         if line_search_fn == "strong_wolfe":
             assert fn is not None
             fn = cast(Callable[[Tensor], Tensor], fn)
             # Choose step size to satisfy strong Wolfe conditions
             grad_fn = torch.func.grad(fn)
-            alpha_k = strong_wolfe_line_search(fn, grad_fn, xk, pk)
+            phi0 = orig_loss
+            grad_phi0 = gradk.dot(pk).item()
+            alpha_k = strong_wolfe_line_search(fn, grad_fn, xk, pk, phi0, grad_phi0)
         elif line_search_fn == "prob_wolfe":
             assert fn is not None
             fn = cast(Callable[[Tensor, bool], Any], fn)
