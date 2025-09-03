@@ -86,10 +86,10 @@ class MBBFGS(SQNBase):
         elif line_search_fn == "prob_wolfe":
             assert fn is not None
             fn = cast(Callable[[Tensor, bool], Any], fn)
-            f0, df0, var_f0, var_df0 = fn(xk, True)
+            var_f0, var_df0 = fn(xk, True)
             # Don't need function handle to return variances in line search
             alpha_k, _, _ = prob_line_search(
-                lambda x: fn(x, False), xk, pk, f0, df0, var_f0, var_df0
+                lambda x: fn(x, False), xk, pk, orig_loss, gradk, var_f0, var_df0
             )
         else:
             # Use fixed step size
