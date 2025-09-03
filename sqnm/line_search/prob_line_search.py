@@ -33,7 +33,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
 
 import logging
-from functools import cache
 from typing import Callable
 
 import numpy as np
@@ -180,7 +179,6 @@ def _rescale_output(a0, tt, a_running_avg) -> tuple[float, float, float]:
     return float(a_accepted), float(a_next), float(a_running_avg)
 
 
-@cache
 def _evaluate_objective(fn, grad_fn, f0, tt, x0, a0, dir, beta):
     """Evaluates and re-scales function and gradient value"""
     x = x0 + tt * a0 * dir
@@ -240,7 +238,7 @@ def _prob_wolfe(t, gp: ProbLSGaussianProcess, c1=0.05, c2=0.5):
 
     # Extremely small variances ==> very certain (deterministic evaluation)
     if V_aa <= 1e-9 and V_bb <= 1e-9:
-        return ((mu_a >= 0) * (mu_b >= 0)).float()
+        return float((mu_a >= 0) * (mu_b >= 0))
 
     # Zero or negative variances (maybe something went wrong?)
     if V_aa <= 0 or V_bb <= 0:
