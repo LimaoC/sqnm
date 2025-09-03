@@ -60,16 +60,20 @@ def prob_line_search(
 ) -> tuple[float, float, float]:
     grad_fn = torch.func.grad(fn)
 
+    grad_phi_0 = df0.dot(dir)
     # Scaling and noise level of GP
-    beta = torch.abs(dir @ df0).item()  # NOTE: df0 not var_df0 as in pseudocode
+    beta = torch.abs(grad_phi_0).item()  # NOTE: df0 not var_df0 as in pseudocode
+    if beta == 0:
+        # Something very wrong, return initial step size
+        return _rescale_output(a0, a0, a_running_avg)
     sigma_f = (var_f0 ** (1 / 2)) / (a0 * beta)
-    sigma_df = (torch.sqrt((dir**2) @ var_df0) / beta).item()
+    sigma_df = (torch.sqrt(var_df0.dot(dir**2)) / beta).item()
 
     gp = ProbLSGaussianProcess(sigma_f, sigma_df)
     tt_ext = 1.0  # Scaled step size for extrapolation
     tt = 1.0  # Scaled step size of first function evaluation (actual is tt * a0)
 
-    gp.add(0.0, 0.0, (df0 @ dir) / beta)
+    gp.add(0.0, 0.0, (grad_phi_0 / beta).item())
 
     while gp.N < L - 1:
         # Evaluate objective at tt, check if Wolfe prob. is above threshold
