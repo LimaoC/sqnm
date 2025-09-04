@@ -194,8 +194,7 @@ class SQNHv(SQNBase):
             # Use fixed step size
             alpha_k = lr
 
-        xk_next = xk + alpha_k * pk
-        self._set_param_vector(xk_next)
+        self._set_param_vector(alpha_k * pk)
 
         if k % skip == 0:
             # Compute curvature pairs every L iterations

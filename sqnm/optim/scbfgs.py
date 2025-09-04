@@ -182,11 +182,10 @@ class SCBFGS(SQNBase):
             # Use fixed step size
             alpha_k = lr
 
-        xk_next = xk + alpha_k * pk
-        self._set_param_vector(xk_next)
-
-        # Can only compute sk now, need next batch to compute yk
         sk = alpha_k * pk
+        self._set_param_vector(sk)
+
+        # Can only store sk now, need next batch to compute yk
         s_hist[state["num_sy_pairs"] % m] = sk
         state["alpha_k_prev"] = alpha_k
         state["gradk_prev"] = gradk

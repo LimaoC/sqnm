@@ -156,8 +156,7 @@ class OLBFGS(SQNBase):
             # Use fixed step size
             alpha_k = lr / c
 
-        xk_next = xk + alpha_k * pk
-        self._set_param_vector(xk_next)
+        self._add_param_vector(alpha_k * pk)
         closure()  # Recompute gradient after setting new param
         gradk_next = self._get_grad_vector()
 

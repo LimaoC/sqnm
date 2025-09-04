@@ -7,6 +7,7 @@ from typing import Any
 
 import torch
 from torch import Tensor
+from torch.nn.utils import parameters_to_vector
 from torch.optim import Optimizer
 from torch.optim.optimizer import ParamsT
 
@@ -34,6 +35,8 @@ class SQNBase(Optimizer):
             )
 
         self._params: list[torch.nn.Parameter] = self.param_groups[0]["params"]
+        with torch.no_grad():
+            self._flat_params = parameters_to_vector(self._params).detach()
 
         # Store LBFGS state in first param
         state = self.state[self._params[0]]
@@ -51,17 +54,20 @@ class SQNBase(Optimizer):
         return grad_vec(self._params)
 
     def _get_param_vector(self) -> Tensor:
-        """Concatenates all parameters into a 1D tensor"""
-        return torch.cat([p.data.view(-1) for p in self._params])
+        """Returns parameter vector as a flat (1D) tensor"""
+        return self._flat_params
+
+    def _add_param_vector(self, vec: torch.Tensor):
+        """Add given flat (1D) tensor to model parameters"""
+        with torch.no_grad():
+            self._flat_params.add_(vec)
+            torch.nn.utils.vector_to_parameters(self._flat_params, self._params)
 
     def _set_param_vector(self, vec: Tensor):
-        """Set model parameters to the given tensor"""
-        offset = 0
+        """Set model parameters to the given flat (1D) tensor"""
         with torch.no_grad():
-            for param in self._params:
-                numel = param.numel()
-                param.copy_(vec[offset : offset + numel].view_as(param))
-                offset += numel
+            self._flat_params.copy_(vec)
+            torch.nn.utils.vector_to_parameters(self._flat_params, self._params)
 
     def _two_loop_recursion(self, grad: Tensor) -> Tensor:
         """

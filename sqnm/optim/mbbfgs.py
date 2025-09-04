@@ -96,7 +96,7 @@ class MBBFGS(SQNBase):
             alpha_k = lr
 
         xk_next = xk + alpha_k * pk
-        self._set_param_vector(xk_next)
+        self._add_param_vector(alpha_k * pk)
 
         sk = alpha_k * pk
         grad_overlap_fn = torch.func.grad(overlap_fn)
