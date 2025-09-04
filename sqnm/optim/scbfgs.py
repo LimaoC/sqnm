@@ -183,7 +183,7 @@ class SCBFGS(SQNBase):
             alpha_k = lr
 
         sk = alpha_k * pk
-        self._set_param_vector(sk)
+        self._add_param_vector(sk)
 
         # Can only store sk now, need next batch to compute yk
         s_hist[state["num_sy_pairs"] % m] = sk
