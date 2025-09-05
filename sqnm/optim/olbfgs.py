@@ -78,13 +78,13 @@ class OLBFGS(SQNBase):
         alphas = torch.zeros(h, device=grad.device)
         for i in reversed(range(h)):
             alphas[i] = s[i].dot(q) / sy[i]
-            q -= alphas[i] * y[i]
+            q.sub_(alphas[i] * y[i])
         if line_search_fn is None:
             alphas[-1] *= c  # Scale alpha_{k-1} by c
         r = (torch.sum(sy / torch.sum(y * y, dim=1)) / h) * q
         for i in range(h):
             beta = y[i].dot(r) / sy[i]
-            r += (alphas[i] - beta) * s[i]
+            r.add_((alphas[i] - beta) * s[i])
         return r
 
     @torch.no_grad()
