@@ -53,10 +53,7 @@ class SQNHv(SQNBase):
 
         state = self.state[self._params[0]]
         state["num_iters"] = 1  # Algorithm in paper starts from k = 1
-        state["xt"] = [
-            torch.zeros_like(self._get_param_vector()),
-            torch.zeros_like(self._get_param_vector()),
-        ]
+        state["xt"] = [None, torch.zeros_like(self._get_param_vector())]
         # Used for probabilistic LS
         state["alpha_start"] = 1.0
         state["alpha_running_avg"] = state["alpha_start"]
@@ -86,11 +83,11 @@ class SQNHv(SQNBase):
         alphas = torch.zeros(h, device=grad.device)
         for i in reversed(range(h)):
             alphas[i] = s[i].dot(q) / sy[i]
-            q -= alphas[i] * y[i]
+            q.sub_(alphas[i] * y[i])
         r = (sy[0] / (y[0].dot(y[0]))) * q
         for i in range(h):
             beta = y[i].dot(r) / sy[i]
-            r += (alphas[i] - beta) * s[i]
+            r.add_((alphas[i] - beta) * s[i])
         return r
 
     @torch.no_grad()
@@ -204,7 +201,7 @@ class SQNHv(SQNBase):
                 st = xt[1] - xt[0]
                 # Compute subsampled Hessian vector product on a different, larger
                 # sample given by curvature_fn
-                _, yt = hvp(curvature_fn, xt[1], v=st, strict=True)
+                _, yt = hvp(curvature_fn, xt[1], v=st, create_graph=False, strict=True)
                 s_hist[t % m] = st
                 y_hist[t % m] = yt
             xt[0], xt[1] = xt[1], torch.zeros_like(xt[1])

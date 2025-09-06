@@ -95,10 +95,10 @@ class MBBFGS(SQNBase):
             # Use fixed step size
             alpha_k = lr
 
-        xk_next = xk + alpha_k * pk
-        self._add_param_vector(alpha_k * pk)
-
         sk = alpha_k * pk
+        self._add_param_vector(sk)
+
+        xk_next = xk + sk
         grad_overlap_fn = torch.func.grad(overlap_fn)
         yk = grad_overlap_fn(xk_next) - grad_overlap_fn(xk)
         s_hist[state["num_sy_pairs"] % m] = sk
