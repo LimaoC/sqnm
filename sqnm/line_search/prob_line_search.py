@@ -63,10 +63,10 @@ def prob_line_search(
     grad_phi_0 = df0.dot(dir)
     # Scaling and noise level of GP
     beta = torch.abs(grad_phi_0).item()  # NOTE: df0 not var_df0 as in pseudocode
-    if beta == 0:
+    if beta <= 1e-12 or np.isnan(beta):
         # Something very wrong, return initial step size
         return _rescale_output(a0, a0, a_running_avg)
-    sigma_f = (var_f0 ** (1 / 2)) / (a0 * beta)
+    sigma_f = np.sqrt(np.float32(var_f0)) / (a0 * beta)
     sigma_df = (torch.sqrt(var_df0.dot(dir**2)) / beta).item()
 
     gp = ProbLSGaussianProcess(sigma_f, sigma_df)
@@ -145,7 +145,7 @@ def prob_line_search(
         # m_min: Collected (not candidate) step size with lowest GP mean
         ei_cand = _expected_improvement(ms_cand, ss_cand, m_min)
         pw_cand = torch.tensor([_prob_wolfe(t, gp) for t in ts_cand])
-        t_best_cand = ts_cand[torch.argmax(ei_cand * pw_cand)]
+        t_best_cand = ts_cand[(ei_cand * pw_cand).argmax()]
 
         # Extend extrapolation step if necessary
         if t_best_cand == tt_next:
@@ -204,7 +204,7 @@ def _cubic_minimum(t, gp: ProbLSGaussianProcess):
 
     det = b**2 - 4 * a * c
     if det < 0:
-        return float("inf")
+        return torch.tensor(torch.inf)
 
     lr = (-b - torch.sign(a) * torch.sqrt(det)) / (2 * a)
     rr = (-b + torch.sign(a) * torch.sqrt(det)) / (2 * a)
