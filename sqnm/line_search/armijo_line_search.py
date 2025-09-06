@@ -12,7 +12,7 @@ def armijo_line_search(
     xk: Tensor,
     pk: Tensor,
     f_xk: float,
-    grad_f_xk: float,
+    grad_f_xk: Tensor,
     a0: float = 1,
     c: float = 1e-4,
 ) -> float:
@@ -25,6 +25,8 @@ def armijo_line_search(
         grad_fn: gradient of objective function
         xk: current iterate
         pk: direction, assumed to be a descent direction
+        f_xk: initial function value, fn(xk)
+        grad_f_xk: initial gradient value, grad_fn(xk)
         a0: initial step size
         c: parameter for Armijo/sufficient decrease condition
 

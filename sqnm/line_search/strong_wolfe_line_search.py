@@ -2,20 +2,18 @@ import logging
 from typing import Callable
 
 import numpy as np
-from line_profiler import profile
 from torch import Tensor
 
 logger = logging.getLogger(__name__)
 
 
-@profile
 def strong_wolfe_line_search(
     fn: Callable[[Tensor], Tensor],
     grad_fn: Callable[[Tensor], Tensor],
     xk: Tensor,
     pk: Tensor,
-    phi0: float,
-    grad_phi0: float,
+    f_xk: float,
+    grad_f_xk: Tensor,
     a0: float = 1.0,
     a_max: float = 100,
     c1: float = 1e-4,
@@ -31,8 +29,8 @@ def strong_wolfe_line_search(
         grad_fn: gradient of objective function
         xk: current iterate
         pk: direction, assumed to be a descent direction
-        phi0: initial phi value, phi(0) = fn(xk)
-        grad_phi0: initial grad_phi value, grad_phi(0) = grad_fn(xk).dot(pk)
+        f_xk: initial function value, fn(xk)
+        grad_f_xk: initial gradient value, grad_fn(xk)
         a0: initial step size (1 should always be used as the initial step size for
             Newton and quasi-Newton methods)
         a_max: maximum step size
@@ -50,8 +48,10 @@ def strong_wolfe_line_search(
     def grad_phi(a_k: float) -> float:
         return grad_fn(xk + a_k * pk).dot(pk).item()
 
+    grad_phi0 = grad_f_xk.dot(pk).item()
+
     def armijo_ok(phi_a: float, a: float) -> bool:
-        return phi_a <= phi0 + c1 * a * grad_phi0
+        return phi_a <= f_xk + c1 * a * grad_phi0
 
     def curvature_ok(grad_phi_a: float) -> bool:
         return abs(grad_phi_a) <= -c2 * grad_phi0
@@ -75,10 +75,6 @@ def strong_wolfe_line_search(
         z_iters = 0
         while z_iters < zoom_max_iters:
             z_iters += 1
-            if a_lo == a_hi:
-                # Failsafe, break here
-                a_j = a_lo
-                break
             # Interpolate to find a trial step size a_j in (a_lo, a_hi)
             a_j = _cubic_interp(
                 a_lo,
@@ -95,7 +91,7 @@ def strong_wolfe_line_search(
             phi_j = phi(a_j)
             if not armijo_ok(phi_j, a_j) or phi_j >= phi_lo:
                 # Narrow search to (a_lo, a_j) - unless a_lo == a_j
-                if a_lo == a_j:
+                if abs(a_lo - a_j) < 1e-9:
                     break
                 a_hi, phi_hi, grad_phi_hi = a_j, phi_j, grad_phi(a_j)
             else:
@@ -114,13 +110,22 @@ def strong_wolfe_line_search(
 
     a_prev = 0.0
     a_curr = a0
-    a_star = a_curr  # Fallback, if something goes wrong
-    phi_prev, grad_phi_prev = phi0, grad_phi0
+    a_star = a_curr
+    phi_prev, grad_phi_prev = f_xk, grad_phi0
+
+    best_armijo_a = a_curr
+    best_armijo_phi = float("inf")
 
     iters = 1
     while iters <= max_iters:
         phi_curr = phi(a_curr)
-        if not armijo_ok(phi_curr, a_curr) or (phi_curr >= phi_prev and iters > 1):
+
+        armijo = armijo_ok(phi_curr, a_curr)
+
+        if armijo and phi_curr < best_armijo_phi:
+            best_armijo_a, best_armijo_phi = a_curr, phi_curr
+
+        if not armijo or (phi_curr >= phi_prev and iters > 1):
             # (a_prev, a_curr) contains step lengths satisfying strong Wolfe conditions
             a_star = zoom(
                 a_prev, a_curr, phi_prev, phi_curr, grad_phi_prev, grad_phi(a_curr)
@@ -144,28 +149,42 @@ def strong_wolfe_line_search(
         a_prev, a_curr = a_curr, min(a_curr * 2, a_max)
         phi_prev, grad_phi_prev = phi_curr, grad_phi_curr
         iters += 1
+
+    # Fallback to best Armijo point if Wolfe conditions aren't satisfied
+    if iters > max_iters:
+        return best_armijo_a
     return a_star
 
 
 def _cubic_interp(
-    x1: float, x2: float, f1: float, f2: float, grad_f1: float, grad_f2: float
+    x1: float, x2: float, f1: float, f2: float, g1: float, g2: float
 ) -> float:
     """
     Find the minimizer of the Hermite-cubic polynomial interpolating a function
     of one variable, at the two points x1 and x2, using the function values f(x_1) = f1
-    and f(x_2) = f2 and derivatives grad_f(x_1) = grad_f1 and grad_f(x_2) = grad_f2.
+    and f(x_2) = f2 and derivatives grad_f(x_1) = g2 and grad_f(x_2) = g2.
 
     REF: Equation 3.59 in Numerical Optimization, Nocedal and Wright
     """
-    d1 = grad_f1 + grad_f2 - 3 * (f1 - f2) / (x1 - x2)
-    d2 = np.sign(x2 - x1) * np.sqrt(d1**2 - grad_f1 * grad_f2)
-    xmin = x2 - (x2 - x1) * (grad_f2 + d2 - d1) / (grad_f2 - grad_f1 + 2 * d2)
-    return xmin
+    if x1 == x2:
+        return x1
+    with np.errstate(divide="raise", over="raise", invalid="raise"):
+        try:
+            d1 = g1 + g2 - 3 * (f1 - f2) / (x1 - x2)
+            discriminant = d1**2 - g1 * g2
+            if discriminant < 0:
+                # Default to midpoint
+                return 0.5 * (x1 + x2)
+            d2 = np.sign(x2 - x1) * np.sqrt(discriminant)
+            return x2 - (x2 - x1) * (g2 + d2 - d1) / (g2 - g1 + 2 * d2)
+        except ArithmeticError:
+            # Default to midpoint
+            return 0.5 * (x1 + x2)
 
 
 def _inside(x: float, a: float, b: float) -> bool:
     """Returns whether x is in (a, b)"""
-    if not np.isreal(x):
+    if not np.isfinite(x):
         return False
 
     a, b = min(a, b), max(a, b)
