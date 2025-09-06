@@ -2,11 +2,13 @@ import logging
 from typing import Callable
 
 import numpy as np
+from line_profiler import profile
 from torch import Tensor
 
 logger = logging.getLogger(__name__)
 
 
+@profile
 def strong_wolfe_line_search(
     fn: Callable[[Tensor], Tensor],
     grad_fn: Callable[[Tensor], Tensor],
@@ -14,7 +16,7 @@ def strong_wolfe_line_search(
     pk: Tensor,
     phi0: float,
     grad_phi0: float,
-    a0: float = 1,
+    a0: float = 1.0,
     a_max: float = 100,
     c1: float = 1e-4,
     c2: float = 0.9,
@@ -47,6 +49,12 @@ def strong_wolfe_line_search(
 
     def grad_phi(a_k: float) -> float:
         return grad_fn(xk + a_k * pk).dot(pk).item()
+
+    def armijo_ok(phi_a: float, a: float) -> bool:
+        return phi_a <= phi0 + c1 * a * grad_phi0
+
+    def curvature_ok(grad_phi_a: float) -> bool:
+        return abs(grad_phi_a) <= -c2 * grad_phi0
 
     def zoom(
         a_lo: float,
@@ -85,17 +93,14 @@ def strong_wolfe_line_search(
                 a_j = (a_lo + a_hi) / 2
 
             phi_j = phi(a_j)
-            # Armijo/sufficient decrease condition
-            armijo_cond = phi_j <= phi0 + c1 * a_j * grad_phi0
-            if not armijo_cond or phi_j >= phi_lo:
+            if not armijo_ok(phi_j, a_j) or phi_j >= phi_lo:
                 # Narrow search to (a_lo, a_j) - unless a_lo == a_j
                 if a_lo == a_j:
                     break
                 a_hi, phi_hi, grad_phi_hi = a_j, phi_j, grad_phi(a_j)
             else:
-                # (Modified) curvature condition
                 grad_phi_j = grad_phi(a_j)
-                if np.abs(grad_phi_j) <= -c2 * grad_phi0:
+                if curvature_ok(grad_phi_j):
                     # a_j satisfies strong Wolfe conditions, stop here
                     break
                 # Maintain condition (c)
@@ -110,24 +115,20 @@ def strong_wolfe_line_search(
     a_prev = 0.0
     a_curr = a0
     a_star = a_curr  # Fallback, if something goes wrong
-    phi_prev = phi0
-    grad_phi_prev = grad_phi0
+    phi_prev, grad_phi_prev = phi0, grad_phi0
 
     iters = 1
     while iters <= max_iters:
-        # Armijo/sufficient decrease condition
         phi_curr = phi(a_curr)
-        armijo_cond = phi_curr <= phi0 + c1 * a_curr * grad_phi0
-        if not armijo_cond or (phi_curr >= phi_prev and iters > 1):
+        if not armijo_ok(phi_curr, a_curr) or (phi_curr >= phi_prev and iters > 1):
             # (a_prev, a_curr) contains step lengths satisfying strong Wolfe conditions
             a_star = zoom(
                 a_prev, a_curr, phi_prev, phi_curr, grad_phi_prev, grad_phi(a_curr)
             )
             break
 
-        # (Modified) curvature condition
         grad_phi_curr = grad_phi(a_curr)
-        if np.abs(grad_phi_curr) <= -c2 * grad_phi0:
+        if curvature_ok(grad_phi_curr):
             # a_curr satisfies strong Wolfe conditions, stop here
             a_star = a_curr
             break
