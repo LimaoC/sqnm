@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 class SQNHv(SQNBase):
     LINE_SEARCH_FNS = ["strong_wolfe", "prob_wolfe"]
+    EXCEPTION_STRATS = ["skip_update"]
 
     def __init__(
         self,
@@ -28,6 +29,7 @@ class SQNHv(SQNBase):
         line_search_fn: str | None = None,
         history_size: int = 20,
         skip: int = 10,
+        weight_decay: float = 0.0,
     ):
         """
         Hessian-Vector Stochastic Quasi-Newton (SQN-Hv)
@@ -36,9 +38,10 @@ class SQNHv(SQNBase):
             params: iterable of parameters to optimize
             lr: learning rate, ignored if line_search_fn is not None
             line_search_fn: line search function to use, either None for fixed step
-                size, or one of OLBFGS.LINE_SEARCH_FNS
+                size, or one of SQNHv.LINE_SEARCH_FNS
             history_size: history size, usually 2 <= m <= 30
             skip: number of iterations between curvature estimates
+            weight_decay: l2 regularisation term
         """
         if line_search_fn is not None and line_search_fn not in self.LINE_SEARCH_FNS:
             raise ValueError(f"SQN-Hv only supports one of: {self.LINE_SEARCH_FNS}")
@@ -48,12 +51,13 @@ class SQNHv(SQNBase):
             history_size=history_size,
             line_search_fn=line_search_fn,
             skip=skip,
+            weight_decay=weight_decay,
         )
         super().__init__(params, defaults)
 
         state = self.state[self._params[0]]
         state["num_iters"] = 1  # Algorithm in paper starts from k = 1
-        state["xt"] = [None, torch.zeros_like(self._get_param_vector())]
+        state["xt"] = torch.zeros_like(self._get_param_vector())
         # Used for probabilistic LS
         state["alpha_start"] = 1.0
         state["alpha_running_avg"] = state["alpha_start"]
@@ -115,6 +119,7 @@ class SQNHv(SQNBase):
         lr = group["lr"]
         line_search_fn = group["line_search_fn"]
         skip = group["skip"]  # L
+        weight_decay = group["weight_decay"]
 
         state = self.state[self._params[0]]
         k = state["num_iters"]
@@ -141,11 +146,13 @@ class SQNHv(SQNBase):
         orig_loss = closure()  # Populate gradients
         xk = self._get_param_vector()
         gradk = self._get_grad_vector()
+        if weight_decay != 0:
+            gradk.add_(xk, alpha=weight_decay)
 
         # NOTE: Termination criterion?
 
         # Accumulate average over L iterations
-        xt[1] += xk
+        xt.add_(xk)
 
         if k <= 2 * skip:
             # Stochastic gradient descent for first 2L iterations
@@ -194,15 +201,15 @@ class SQNHv(SQNBase):
         if k % skip == 0:
             # Compute curvature pairs every L iterations
             t = state["num_sy_pairs"] - 1
-            xt[1] /= skip
+            xt.div_(skip)
             if t >= 0:
-                st = xt[1] - xt[0]
+                st = alpha_k * pk
                 # Compute subsampled Hessian vector product on a different, larger
                 # sample given by curvature_fn
-                _, yt = hvp(curvature_fn, xt[1], v=st, create_graph=False, strict=True)
+                _, yt = hvp(curvature_fn, xt, v=st, create_graph=False, strict=True)
                 s_hist[t % m] = st
                 y_hist[t % m] = yt
-            xt[0], xt[1] = xt[1], torch.zeros_like(xt[1])
+            xt.zero_()
             state["num_sy_pairs"] += 1
 
         state["num_iters"] += 1

@@ -28,6 +28,7 @@ class OLBFGS(SQNBase):
         history_size: int = 20,
         reg_term: float = 0.0,
         c: float = 1.0,
+        weight_decay: float = 0.0,
     ):
         """
         Online limited-memory BFGS (oL-BFGS)
@@ -40,6 +41,7 @@ class OLBFGS(SQNBase):
             history_size: history size, usually 2 <= m <= 30
             reg_term: regularisation parameter in gradient difference term
             c: step size scaling factor
+            weight_decay: l2 regularisation term
         """
         if line_search_fn is not None and line_search_fn not in self.LINE_SEARCH_FNS:
             raise ValueError(f"o-LBFGS only supports one of: {self.LINE_SEARCH_FNS}")
@@ -50,6 +52,7 @@ class OLBFGS(SQNBase):
             history_size=history_size,
             reg_term=reg_term,
             c=c,
+            weight_decay=weight_decay,
         )
         super().__init__(params, defaults)
 
@@ -110,6 +113,7 @@ class OLBFGS(SQNBase):
         m = group["history_size"]
         reg_term = group["reg_term"]
         c = group["c"]
+        weight_decay = group["weight_decay"]
 
         state = self.state[self._params[0]]
         k = state["num_iters"]
@@ -127,6 +131,8 @@ class OLBFGS(SQNBase):
         orig_loss = closure()  # Populate gradients
         xk = self._get_param_vector()
         gradk = self._get_grad_vector()
+        if weight_decay != 0:
+            gradk.add_(xk, alpha=weight_decay)
 
         # NOTE: Termination criterion?
 

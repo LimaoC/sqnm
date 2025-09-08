@@ -32,7 +32,25 @@ class SCBFGS(SQNBase):
         eta2: float = 4,
         rho: float = 1 / 8,
         tau: float = 8,
+        weight_decay: float = 0.0,
     ):
+        """
+        Self-Correcting BFGS (SC-BFGS)
+
+        Parameters:
+            params: iterable of parameters to optimize
+            lr: learning rate, ignored if line_search_fn is not None
+            line_search_fn: line search function to use, either None for fixed step
+                size, or one of SCBFGS.LINE_SEARCH_FNS
+            history_size: history size, usually 2 <= m <= 30
+            stable: if True, the current update is skipped if self-correcting conditions
+                aren't met for an independent proxy batch (skips up to two batches)
+            eta1: lower-bound for s.dot(y)/||s||^2 in self-correcting theorem
+            eta2: upper-bound for ||y||^2/s.dot(y) in self-correcting theorem
+            rho: scaling constant in self-correcting assumption
+            tau: shift constant in self-correcting assumption
+            weight_decay: l2 regularisation term
+        """
         if line_search_fn is not None and line_search_fn not in self.LINE_SEARCH_FNS:
             raise ValueError(f"SC-BFGS only supports one of: {self.LINE_SEARCH_FNS}")
         if eta1 <= 0 or eta1 >= 1:
@@ -49,6 +67,7 @@ class SCBFGS(SQNBase):
             eta2=eta2,
             rho=rho,
             tau=tau,
+            weight_decay=weight_decay,
         )
         super().__init__(params, defaults)
 
@@ -105,10 +124,10 @@ class SCBFGS(SQNBase):
         line_search_fn = group["line_search_fn"]
         m = group["history_size"]
         stable = group["stable"]
+        weight_decay = group["weight_decay"]
 
         state = self.state[self._params[0]]
         k = state["num_iters"]
-        # sy_history = state["sy_history"]
         s_hist = state["s_hist"]
         y_hist = state["y_hist"]
 
@@ -123,14 +142,15 @@ class SCBFGS(SQNBase):
         orig_loss = closure()  # Populate gradients
         xk = self._get_param_vector()
         gradk = self._get_grad_vector()
+        if weight_decay != 0:
+            gradk.add_(xk, alpha=weight_decay)
 
         # NOTE: Termination criterion?
 
         if k == 0:
             pk = -gradk  # Gradient descent for first iteration
         else:
-            # Store curvature pairs from previous iteration
-            # Store (sk, yk) from previous iteration
+            # Compute (sk, yk) from previous iteration
             # sk computed already - need yk using this iteration's stochastic gradient
             sk = s_hist[state["num_sy_pairs"] % m]
             vk = gradk - state["gradk_prev"]

@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 class MBBFGS(SQNBase):
     LINE_SEARCH_FNS = ["strong_wolfe", "prob_wolfe"]
+    EXCEPTION_STRATS = ["skip_update"]
 
     def __init__(
         self,
@@ -26,14 +27,37 @@ class MBBFGS(SQNBase):
         lr: float = 1e-3,
         line_search_fn: str | None = None,
         history_size: int = 20,
+        weight_decay: float = 0.0,
+        exception_strat: str | None = None,
+        eps: float = 1e-8,
     ):
+        """
+        Multi-Batch BFGS (MB-BFGS)
+
+        Parameters:
+            params: iterable of parameters to optimize
+            lr: learning rate, ignored if line_search_fn is not None
+            line_search_fn: line search function to use, either None for fixed step
+                size, or one of MBBFGS.LINE_SEARCH_FNS
+            history_size: history size, usually 2 <= m <= 30
+            weight_decay: l2 regularisation term
+            exception_strat: strategy to employ if curvature condition is violated,
+                either None for no strategy or one of MBBFGS.EXCEPTION_STRATS
+            eps: if exception_strat == "skip_update", the update is skipped if
+                s.dot(y) < eps * ||s||^2
+        """
         if line_search_fn is not None and line_search_fn not in self.LINE_SEARCH_FNS:
             raise ValueError(f"MB-BFGS only supports one of: {self.LINE_SEARCH_FNS}")
+        if exception_strat is not None and exception_strat not in self.EXCEPTION_STRATS:
+            raise ValueError(f"MB-BFGS only supports one of: {self.EXCEPTION_STRATS}")
 
         defaults = dict(
             lr=lr,
             line_search_fn=line_search_fn,
             history_size=history_size,
+            weight_decay=weight_decay,
+            exception_strat=exception_strat,
+            eps=eps,
         )
         super().__init__(params, defaults)
 
@@ -49,6 +73,9 @@ class MBBFGS(SQNBase):
         lr = group["lr"]
         line_search_fn = group["line_search_fn"]
         m = group["history_size"]
+        weight_decay = group["weight_decay"]
+        exception_strat = group["exception_strat"]
+        eps = group["eps"]
 
         state = self.state[self._params[0]]
         k = state["num_iters"]
@@ -66,6 +93,8 @@ class MBBFGS(SQNBase):
         orig_loss = closure()  # Populate gradients
         xk = self._get_param_vector()
         gradk = self._get_grad_vector()
+        if weight_decay != 0:
+            gradk.add_(xk, alpha=weight_decay)
 
         # NOTE: Termination criterion?
 
@@ -94,11 +123,15 @@ class MBBFGS(SQNBase):
             alpha_k = lr
 
         sk = alpha_k * pk
-        self._add_param_vector(sk)
-
         xk_next = xk + sk
         grad_overlap_fn = torch.func.grad(overlap_fn)
         yk = grad_overlap_fn(xk_next) - grad_overlap_fn(xk)
+
+        if exception_strat == "skip_update" and sk.dot(yk) < eps * sk.dot(sk):
+            # Curvature condition violated, skip this update
+            return orig_loss
+
+        self._add_param_vector(sk)
         s_hist[state["num_sy_pairs"] % m] = sk
         y_hist[state["num_sy_pairs"] % m] = yk
         state["num_sy_pairs"] += 1
