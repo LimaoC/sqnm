@@ -8,8 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 def strong_wolfe_line_search(
-    fn: Callable[[Tensor], Tensor],
-    grad_fn: Callable[[Tensor], Tensor],
+    fn: Callable[[Tensor], tuple[Tensor, Tensor]],
     xk: Tensor,
     pk: Tensor,
     f_xk: float,
@@ -20,17 +19,18 @@ def strong_wolfe_line_search(
     c2: float = 0.9,
     max_iters: int = 10,
     zoom_max_iters: int = 10,
-) -> float:
+) -> tuple[float, int]:
     """
-    Finds an optimal step size that satisfies strong Wolfe conditions.
+    Finds and returns an optimal step size that satisfies strong Wolfe conditions,
+    along with the number of function evaluations used.
 
     Parameters:
-        fn: objective function, assumed to be bounded below along the direction p_k
-        grad_fn: gradient of objective function
+        fn: function to compute a tuple of (gradient, objective) for a given input,
+            objective function is assumed to eb bounded below along the direction p_k
         xk: current iterate
         pk: direction, assumed to be a descent direction
-        f_xk: initial function value, fn(xk)
-        grad_f_xk: initial gradient value, grad_fn(xk)
+        f_xk: initial function value at xk
+        grad_f_xk: initial gradient value at xk
         a0: initial step size (1 should always be used as the initial step size for
             Newton and quasi-Newton methods)
         a_max: maximum step size
@@ -42,13 +42,20 @@ def strong_wolfe_line_search(
     REF: Algorithm 3.5 in Numerical Optimization by Nocedal and Wright
     """
 
-    def phi(a_k: float) -> float:
-        return fn(xk + a_k * pk).item()
+    func_evals = 0
 
-    def grad_phi(a_k: float) -> float:
-        return grad_fn(xk + a_k * pk).dot(pk).item()
-
+    a_prev = 0.0
+    a_curr = a0
+    a_star = a_curr
     grad_phi0 = grad_f_xk.dot(pk).item()
+    phi_prev, grad_phi_prev = f_xk, grad_phi0
+
+    best_armijo_a = a_curr
+    best_armijo_phi = float("inf")
+
+    def phi(a_k: float) -> tuple[float, float]:
+        grad, val = fn(xk + a_k * pk)
+        return grad.dot(pk).item(), val.item()
 
     def armijo_ok(phi_a: float, a: float) -> bool:
         return phi_a <= f_xk + c1 * a * grad_phi0
@@ -71,6 +78,7 @@ def strong_wolfe_line_search(
         # (b) a_lo gives the smallest function value among all step lengths generated so
         #     far that satisfy the sufficient decrease condition
         # (c) a_hi is chosen s.t. grad_phi(a_lo) * (a_hi - a_lo) < 0
+        nonlocal func_evals
 
         z_iters = 0
         while z_iters < zoom_max_iters:
@@ -88,14 +96,14 @@ def strong_wolfe_line_search(
             if not _inside(a_j, a_lo, a_hi):
                 a_j = (a_lo + a_hi) / 2
 
-            phi_j = phi(a_j)
+            grad_phi_j, phi_j = phi(a_j)
+            func_evals += 2
             if not armijo_ok(phi_j, a_j) or phi_j >= phi_lo:
                 # Narrow search to (a_lo, a_j) - unless a_lo == a_j
                 if abs(a_lo - a_j) < 1e-9:
                     break
-                a_hi, phi_hi, grad_phi_hi = a_j, phi_j, grad_phi(a_j)
+                a_hi, phi_hi, grad_phi_hi = a_j, phi_j, grad_phi_j
             else:
-                grad_phi_j = grad_phi(a_j)
                 if curvature_ok(grad_phi_j):
                     # a_j satisfies strong Wolfe conditions, stop here
                     break
@@ -108,17 +116,10 @@ def strong_wolfe_line_search(
         # NOTE: Returning here without satisfying strong Wolfe conditions
         return a_j
 
-    a_prev = 0.0
-    a_curr = a0
-    a_star = a_curr
-    phi_prev, grad_phi_prev = f_xk, grad_phi0
-
-    best_armijo_a = a_curr
-    best_armijo_phi = float("inf")
-
     iters = 1
     while iters <= max_iters:
-        phi_curr = phi(a_curr)
+        grad_phi_curr, phi_curr = phi(a_curr)
+        func_evals += 2
 
         armijo = armijo_ok(phi_curr, a_curr)
 
@@ -128,11 +129,10 @@ def strong_wolfe_line_search(
         if not armijo or (phi_curr >= phi_prev and iters > 1):
             # (a_prev, a_curr) contains step lengths satisfying strong Wolfe conditions
             a_star = zoom(
-                a_prev, a_curr, phi_prev, phi_curr, grad_phi_prev, grad_phi(a_curr)
+                a_prev, a_curr, phi_prev, phi_curr, grad_phi_prev, grad_phi_curr
             )
             break
 
-        grad_phi_curr = grad_phi(a_curr)
         if curvature_ok(grad_phi_curr):
             # a_curr satisfies strong Wolfe conditions, stop here
             a_star = a_curr
@@ -152,8 +152,8 @@ def strong_wolfe_line_search(
 
     # Fallback to best Armijo point if Wolfe conditions aren't satisfied
     if iters > max_iters:
-        return best_armijo_a
-    return a_star
+        return best_armijo_a, func_evals
+    return a_star, func_evals
 
 
 def _cubic_interp(

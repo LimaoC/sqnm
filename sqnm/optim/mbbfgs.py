@@ -24,6 +24,8 @@ class MBBFGS(SQNBase):
     def __init__(
         self,
         params,
+        batch_size: int,
+        overlap_batch_size: int,
         lr: float = 1e-3,
         line_search_fn: str | None = None,
         history_size: int = 20,
@@ -36,6 +38,8 @@ class MBBFGS(SQNBase):
 
         Parameters:
             params: iterable of parameters to optimize
+            batch_size: used to keep track of number of function evaluations
+            overlap_batch_size: used to keep track of number of function evaluations
             lr: learning rate, ignored if line_search_fn is not None
             line_search_fn: line search function to use, either None for fixed step
                 size, or one of MBBFGS.LINE_SEARCH_FNS
@@ -52,6 +56,8 @@ class MBBFGS(SQNBase):
             raise ValueError(f"MB-BFGS only supports one of: {self.EXCEPTION_STRATS}")
 
         defaults = dict(
+            batch_size=batch_size,
+            overlap_batch_size=overlap_batch_size,
             lr=lr,
             line_search_fn=line_search_fn,
             history_size=history_size,
@@ -64,12 +70,14 @@ class MBBFGS(SQNBase):
     @torch.no_grad()
     def step(  # type: ignore[override]
         self,
-        closure: Callable[[], float],
+        closure: Callable[[], Tensor],
         overlap_fn: Callable[[Tensor], Tensor],
         fn: Callable[[Tensor], Tensor] | Callable[[Tensor, bool], Any] | None = None,
     ):
         # Get state and hyperparameter variables
         group = self.param_groups[0]
+        batch_size = group["batch_size"]
+        overlap_batch_size = group["overlap_batch_size"]
         lr = group["lr"]
         line_search_fn = group["line_search_fn"]
         m = group["history_size"]
@@ -91,6 +99,9 @@ class MBBFGS(SQNBase):
         closure = torch.enable_grad()(closure)
 
         orig_loss = closure()  # Populate gradients
+        loss = float(orig_loss)
+        state["func_evals"] += 2 * batch_size  # Forward + backward pass
+
         xk = self._get_param_vector()
         gradk = self._get_grad_vector()
         if weight_decay != 0:
@@ -105,19 +116,21 @@ class MBBFGS(SQNBase):
             pk = -self._two_loop_recursion(gradk)
 
         if line_search_fn == "strong_wolfe":
-            assert fn is not None
             fn = cast(Callable[[Tensor], Tensor], fn)
-            # Choose step size to satisfy strong Wolfe conditions
-            grad_fn = torch.func.grad(fn)
-            alpha_k = strong_wolfe_line_search(fn, grad_fn, xk, pk, orig_loss, gradk)
+            grad_and_val_fn = torch.func.grad_and_value(fn)
+            alpha_k, ls_func_evals = strong_wolfe_line_search(
+                grad_and_val_fn, xk, pk, loss, gradk
+            )
+            state["func_evals"] += ls_func_evals * batch_size
         elif line_search_fn == "prob_wolfe":
-            assert fn is not None
             fn = cast(Callable[[Tensor, bool], Any], fn)
+            grad_and_val_fn = torch.func.grad_and_value(lambda x: fn(x, False))
             var_f0, var_df0 = fn(xk, True)
             # Don't need function handle to return variances in line search
-            alpha_k, _, _ = prob_line_search(
-                lambda x: fn(x, False), xk, pk, orig_loss, gradk, var_f0, var_df0
+            alpha_k, _, _, ls_func_evals = prob_line_search(
+                grad_and_val_fn, xk, pk, loss, gradk, var_f0, var_df0
             )
+            state["func_evals"] += ls_func_evals * batch_size
         else:
             # Use fixed step size
             alpha_k = lr
@@ -126,6 +139,7 @@ class MBBFGS(SQNBase):
         xk_next = xk + sk
         grad_overlap_fn = torch.func.grad(overlap_fn)
         yk = grad_overlap_fn(xk_next) - grad_overlap_fn(xk)
+        state["func_evals"] += 4 * overlap_batch_size  # Forward + backward pass
 
         if exception_strat == "skip_update" and sk.dot(yk) < eps * sk.dot(sk):
             # Curvature condition violated, skip this update

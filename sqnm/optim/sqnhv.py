@@ -25,6 +25,8 @@ class SQNHv(SQNBase):
     def __init__(
         self,
         params,
+        batch_size: int,
+        curvature_batch_size: int,
         lr: float = 1e-3,
         line_search_fn: str | None = None,
         history_size: int = 20,
@@ -36,6 +38,8 @@ class SQNHv(SQNBase):
 
         Parameters:
             params: iterable of parameters to optimize
+            batch_size: used to keep track of number of function evaluations
+            curvature_batch_size: used to keep track of number of function evaluations
             lr: learning rate, ignored if line_search_fn is not None
             line_search_fn: line search function to use, either None for fixed step
                 size, or one of SQNHv.LINE_SEARCH_FNS
@@ -52,6 +56,8 @@ class SQNHv(SQNBase):
             line_search_fn=line_search_fn,
             skip=skip,
             weight_decay=weight_decay,
+            batch_size=batch_size,
+            curvature_batch_size=curvature_batch_size,
         )
         super().__init__(params, defaults)
 
@@ -97,29 +103,31 @@ class SQNHv(SQNBase):
     @torch.no_grad()
     def step(  # type: ignore[override]
         self,
-        closure: Callable[[], float],
+        closure: Callable[[], Tensor],
         fn: Callable[[Tensor], Tensor] | Callable[[Tensor, bool], Any] | None = None,
         curvature_fn: Callable[[Tensor], Tensor] | None = None,
-    ) -> float:
+    ) -> Tensor:
         """
         Perform a single SQN-Hv iteration.
 
         Parameters:
             closure: A closure that re-evaluates the model and returns the loss.
             fn: A pure function that computes the loss for a given input. Required if
-                line_search_fn == "prob_wolfe". The function should take a boolean
-                parameter which, if True, also returns the gradient, loss variance, and
-                gradient variance.
+                using line search. For linesearch_fn == "prob_wolfe", the function
+                should also take a boolean parameter which, if True, also returns the
+                gradient, loss variance, and gradient variance.
             curvature_fn: A pure function that computes the loss for a given input. The
                 function should be provided every `skip` iterations.
         """
         # Get state and hyperparameter variables
         group = self.param_groups[0]
-        m = group["history_size"]
         lr = group["lr"]
         line_search_fn = group["line_search_fn"]
+        m = group["history_size"]
         skip = group["skip"]  # L
         weight_decay = group["weight_decay"]
+        batch_size = group["batch_size"]
+        curvature_batch_size = group["curvature_batch_size"]
 
         state = self.state[self._params[0]]
         k = state["num_iters"]
@@ -144,6 +152,9 @@ class SQNHv(SQNBase):
         closure = torch.enable_grad()(closure)
 
         orig_loss = closure()  # Populate gradients
+        loss = float(orig_loss)
+        state["func_evals"] += 2 * batch_size  # Forward + backward pass
+
         xk = self._get_param_vector()
         gradk = self._get_grad_vector()
         if weight_decay != 0:
@@ -162,36 +173,40 @@ class SQNHv(SQNBase):
             pk = -self._two_loop_recursion(gradk)
 
         if line_search_fn == "strong_wolfe":
-            assert fn is not None
             fn = cast(Callable[[Tensor], Tensor], fn)
-            # Choose step size to satisfy strong Wolfe conditions
-            grad_fn = torch.func.grad(fn)
-            alpha_k = strong_wolfe_line_search(fn, grad_fn, xk, pk, orig_loss, gradk)
+            grad_and_val_fn = torch.func.grad_and_value(fn)
+            alpha_k, ls_func_evals = strong_wolfe_line_search(
+                grad_and_val_fn, xk, pk, loss, gradk
+            )
+            state["func_evals"] += ls_func_evals * batch_size
         elif line_search_fn == "prob_wolfe":
-            assert fn is not None
             fn = cast(Callable[[Tensor, bool], Any], fn)
+            grad_and_val_fn = torch.func.grad_and_value(lambda x: fn(x, False))
             var_f0, var_df0 = fn(xk, True)
             # Don't need function handle to return vars in line search
             if k <= 2 * skip:
                 # Propagate step sizes in probabilistic ls - we don't have curvature
                 # information yet
-                alpha_k, alpha_start, alpha_running_avg = prob_line_search(
-                    lambda x: fn(x, False),
-                    xk,
-                    pk,
-                    orig_loss,
-                    gradk,
-                    var_f0,
-                    var_df0,
-                    a_running_avg=alpha_running_avg,
-                    a0=alpha_start,
+                alpha_k, alpha_start, alpha_running_avg, ls_func_evals = (
+                    prob_line_search(
+                        grad_and_val_fn,
+                        xk,
+                        pk,
+                        loss,
+                        gradk,
+                        var_f0,
+                        var_df0,
+                        a_running_avg=alpha_running_avg,
+                        a0=alpha_start,
+                    )
                 )
                 state["alpha_start"] = alpha_start
                 state["running_avg"] = alpha_running_avg
             else:
-                alpha_k, _, _ = prob_line_search(
-                    lambda x: fn(x, False), xk, pk, orig_loss, gradk, var_f0, var_df0
+                alpha_k, _, _, ls_func_evals = prob_line_search(
+                    grad_and_val_fn, xk, pk, loss, gradk, var_f0, var_df0
                 )
+            state["func_evals"] += ls_func_evals * batch_size
         else:
             # Use fixed step size
             alpha_k = lr
@@ -207,6 +222,7 @@ class SQNHv(SQNBase):
                 # Compute subsampled Hessian vector product on a different, larger
                 # sample given by curvature_fn
                 _, yt = hvp(curvature_fn, xt, v=st, create_graph=False, strict=True)
+                state["func_evals"] += 2 * curvature_batch_size
                 s_hist[t % m] = st
                 y_hist[t % m] = yt
             xt.zero_()

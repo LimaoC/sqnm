@@ -46,7 +46,7 @@ logger = logging.getLogger(__name__)
 
 
 def prob_line_search(
-    fn: Callable[[Tensor], Tensor],
+    fn: Callable[[Tensor], tuple[Tensor, Tensor]],
     x0: Tensor,  # [d]
     dir: Tensor,  # [d]
     f0: float,
@@ -57,15 +57,15 @@ def prob_line_search(
     a0: float = 1.0,  # QN methods should try a step size of 1.0 first
     L: int = 10,  # max number of function evaluations
     wolfe_threshold: float = 0.3,
-) -> tuple[float, float, float]:
-    grad_fn = torch.func.grad(fn)
+) -> tuple[float, float, float, int]:
+    ls_func_evals = 0
 
     grad_phi_0 = df0.dot(dir)
     # Scaling and noise level of GP
     beta = torch.abs(grad_phi_0).item()  # NOTE: df0 not var_df0 as in pseudocode
     if beta <= 1e-12 or np.isnan(beta):
         # Something very wrong, return initial step size
-        return _rescale_output(a0, a0, a_running_avg)
+        return _rescale_output(a0, a0, a_running_avg, ls_func_evals)
     sigma_f = np.sqrt(np.float32(var_f0)) / (a0 * beta)
     sigma_df = (torch.sqrt(var_df0.dot(dir**2)) / beta).item()
 
@@ -77,10 +77,11 @@ def prob_line_search(
 
     while gp.N < L - 1:
         # Evaluate objective at tt, check if Wolfe prob. is above threshold
-        y, dy = _evaluate_objective(fn, grad_fn, f0, tt, x0, a0, dir, beta)
+        y, dy = _evaluate_objective(fn, f0, tt, x0, a0, dir, beta)
+        ls_func_evals += 2
         gp.add(tt, y, dy)
         if _prob_wolfe(tt, gp) > wolfe_threshold:
-            return _rescale_output(a0, tt, a_running_avg)
+            return _rescale_output(a0, tt, a_running_avg, ls_func_evals)
 
         # Find suitable candidates for next evaluation
         ms = [gp.mu(t) for t in gp.ts]
@@ -94,7 +95,7 @@ def prob_line_search(
             # Stop here - though Wolfe conditions may not be guaranteed
             y = gp.ys[min_m_idx]
             dy = gp.dys[min_m_idx]
-            return _rescale_output(a0, tt, a_running_avg)
+            return _rescale_output(a0, tt, a_running_avg, ls_func_evals)
 
         # Sort both gp.ts and ms, according to sort order for gp.ts
         ts_sorted, ms_sorted = zip(*sorted(zip(gp.ts, ms)))
@@ -122,7 +123,7 @@ def prob_line_search(
                     ss_cand.append(torch.sqrt(gp.V(tt_cub_min)))  # NOTE: Take sqrt here
             elif n == 0 and gp.d1mu(0) > 0:
                 tt = 0.01 * (ts_sorted[n] + ts_sorted[n + 1])
-                return _rescale_output(a0, tt, a_running_avg)
+                return _rescale_output(a0, tt, a_running_avg, ls_func_evals)
 
             # Check if an old step size is now acceptable
             if n > 0 and _prob_wolfe(ts_sorted[n], gp) > wolfe_threshold:
@@ -133,9 +134,9 @@ def prob_line_search(
         # with preference for the current step size tt
         if len(ts_wolfe) > 0:
             if tt in ts_wolfe:
-                return _rescale_output(a0, tt, a_running_avg)
+                return _rescale_output(a0, tt, a_running_avg, ls_func_evals)
             tt = ts_wolfe[np.argmin(ms_wolfe)]
-            return _rescale_output(a0, tt, a_running_avg)
+            return _rescale_output(a0, tt, a_running_avg, ls_func_evals)
 
         tt_next = max(gp.ts) + tt_ext
         ts_cand.append(tt_next)
@@ -153,21 +154,24 @@ def prob_line_search(
         tt = t_best_cand
 
     # Reached budget without finding acceptable point, check final point for acceptance
-    y, dy = _evaluate_objective(fn, grad_fn, f0, tt, x0, a0, dir, beta)
+    y, dy = _evaluate_objective(fn, f0, tt, x0, a0, dir, beta)
+    ls_func_evals += 2
     gp.add(tt, y, dy)
     if _prob_wolfe(tt, gp) > wolfe_threshold:
-        return _rescale_output(a0, tt, a_running_avg)
+        return _rescale_output(a0, tt, a_running_avg, ls_func_evals)
 
     # Otherwise - return point with lowest GP mean
     ms = [gp.mu(t) for t in gp.ts[1:]]
     tt = gp.ts[np.argmin(ms) + 1]
-    return _rescale_output(a0, tt, a_running_avg)
+    return _rescale_output(a0, tt, a_running_avg, ls_func_evals)
 
 
-def _rescale_output(a0, tt, a_running_avg) -> tuple[float, float, float]:
+def _rescale_output(
+    a0, tt, a_running_avg, ls_func_evals
+) -> tuple[float, float, float, int]:
     a_accepted = tt * a0
     if a_running_avg is None:
-        return float(a_accepted), -1, -1
+        return float(a_accepted), -1, -1, ls_func_evals
 
     a_ext = 1.3
     theta_reset = 100
@@ -180,14 +184,15 @@ def _rescale_output(a0, tt, a_running_avg) -> tuple[float, float, float]:
     if (a_next < a_running_avg / theta_reset) or (a_next > a_running_avg * theta_reset):
         a_next = a_running_avg
 
-    return float(a_accepted), float(a_next), float(a_running_avg)
+    return float(a_accepted), float(a_next), float(a_running_avg), ls_func_evals
 
 
-def _evaluate_objective(fn, grad_fn, f0, tt, x0, a0, dir, beta):
+def _evaluate_objective(fn, f0, tt, x0, a0, dir, beta):
     """Evaluates and re-scales function and gradient value"""
     x = x0 + tt * a0 * dir
-    y = (fn(x) - f0) / (a0 * beta)
-    dy = (grad_fn(x) @ dir) / beta
+    grad, val = fn(x)
+    y = (val - f0) / (a0 * beta)
+    dy = (grad @ dir) / beta
     return y, dy
 
 
