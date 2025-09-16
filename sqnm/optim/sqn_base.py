@@ -95,7 +95,7 @@ class SQNBase(Optimizer):
         for i in reversed(range(h)):
             alphas[i] = s[i].dot(q) / sy[i]
             q.sub_(alphas[i] * y[i])
-        r = (sy[0] / (y[0].dot(y[0]))) * q
+        r = (sy[-1] / (y[-1].dot(y[-1]))) * q
         for i in range(h):
             beta = y[i].dot(r) / sy[i]
             r.add_((alphas[i] - beta) * s[i])

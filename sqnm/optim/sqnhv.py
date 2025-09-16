@@ -63,6 +63,7 @@ class SQNHv(SQNBase):
 
         state = self.state[self._params[0]]
         state["num_iters"] = 1  # Algorithm in paper starts from k = 1
+        state["num_sy_pairs"] = -1
         state["xt"] = torch.zeros_like(self._get_param_vector())
         # Used for probabilistic LS
         state["alpha_start"] = 1.0
@@ -82,7 +83,7 @@ class SQNHv(SQNBase):
         state = self.state[self._params[0]]
         # The paper's t index is off by 1 compared to the convention, account for this
         # They define s_t = x_t - x_{t-1} instead of s_{t-1} = x_t - x_{t-1}
-        t = state["num_sy_pairs"] - 1
+        t = state["num_sy_pairs"]
         h = min(t, m)  # Number of curvature pairs to use
         idxs = torch.arange(t - h, t) % m
         s = state["s_hist"][idxs]  # [h, d]
@@ -94,7 +95,7 @@ class SQNHv(SQNBase):
         for i in reversed(range(h)):
             alphas[i] = s[i].dot(q) / sy[i]
             q.sub_(alphas[i] * y[i])
-        r = (sy[0] / (y[0].dot(y[0]))) * q
+        r = (sy[-1] / (y[-1].dot(y[-1]))) * q
         for i in range(h):
             beta = y[i].dot(r) / sy[i]
             r.add_((alphas[i] - beta) * s[i])
@@ -162,9 +163,6 @@ class SQNHv(SQNBase):
 
         # NOTE: Termination criterion?
 
-        # Accumulate average over L iterations
-        xt.add_(xk)
-
         if k <= 2 * skip:
             # Stochastic gradient descent for first 2L iterations
             pk = -gradk
@@ -201,7 +199,7 @@ class SQNHv(SQNBase):
                     )
                 )
                 state["alpha_start"] = alpha_start
-                state["running_avg"] = alpha_running_avg
+                state["alpha_running_avg"] = alpha_running_avg
             else:
                 alpha_k, _, _, ls_func_evals = prob_line_search(
                     grad_and_val_fn, xk, pk, loss, gradk, var_f0, var_df0
@@ -211,22 +209,26 @@ class SQNHv(SQNBase):
             # Use fixed step size
             alpha_k = lr
 
-        self._add_param_vector(alpha_k * pk)
+        sk = alpha_k * pk
+        self._add_param_vector(sk)
+
+        # Accumulate average over L iterations
+        xt.add_(xk + sk)
 
         if k % skip == 0:
             # Compute curvature pairs every L iterations
-            t = state["num_sy_pairs"] - 1
+            t = state["num_sy_pairs"]
+            state["num_sy_pairs"] += 1
             xt.div_(skip)
             if t >= 0:
-                st = alpha_k * pk
-                # Compute subsampled Hessian vector product on a different, larger
-                # sample given by curvature_fn
+                st = sk
+                # Compute subsampled Hessian vector product on a different sample given
+                # by curvature_fn
                 _, yt = hvp(curvature_fn, xt, v=st, create_graph=False, strict=True)
-                state["func_evals"] += 2 * curvature_batch_size
+                state["func_evals"] += 4 * curvature_batch_size
                 s_hist[t % m] = st
                 y_hist[t % m] = yt
             xt.zero_()
-            state["num_sy_pairs"] += 1
 
         state["num_iters"] += 1
         return orig_loss
