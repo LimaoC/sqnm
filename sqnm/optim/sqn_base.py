@@ -42,6 +42,8 @@ class SQNBase(Optimizer):
         state = self.state[self._params[0]]
         state["num_iters"] = 0
         state["func_evals"] = 0
+        state["alphas"] = []
+        state["sdotys"] = []
         # Store the m most recent (s, y) pairs
         # s is the iterate difference, y is the gradient difference
         m = defaults["history_size"]

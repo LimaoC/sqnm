@@ -131,9 +131,11 @@ class SCBFGS(SQNBase):
         weight_decay = group["weight_decay"]
 
         state = self.state[self._params[0]]
-        k = state["num_iters"]
-        s_hist = state["s_hist"]
-        y_hist = state["y_hist"]
+        k: int = state["num_iters"]
+        s_hist: Tensor = state["s_hist"]
+        y_hist: Tensor = state["y_hist"]
+        alphas: list[float] = state["alphas"]
+        sdotys: list[Tensor] = state["sdotys"]
 
         if line_search_fn is not None and fn is None:
             raise ValueError("fn parameter is needed for line search")
@@ -166,9 +168,12 @@ class SCBFGS(SQNBase):
             yk_tmp = state["alpha_k_prev"] * vk
             betak = self._compute_beta(sk, yk_tmp)
             yk = betak * sk + (1 - betak) * yk_tmp
-            # Keep reference to the y we've replaced, in case we need to discard yk
-            y_tmp = y_hist[state["num_sy_pairs"] % m]
+            if stable:
+                # Keep reference to the y we've replaced, in case we need to discard yk
+                y_tmp = y_hist[state["num_sy_pairs"] % m]
             # Set new curvature pair (sk, yk)
+            alphas.append(state["alpha_k_prev"])
+            sdotys.append(sk.dot(yk))
             y_hist[state["num_sy_pairs"] % m] = yk
             state["num_sy_pairs"] += 1
 
@@ -186,8 +191,10 @@ class SCBFGS(SQNBase):
                     state["num_proxy_funcs"] = 0
                 else:
                     # Not satisfied, discard this batch (undo curvature pair)
-                    state["num_sy_pairs"] -= 1
+                    alphas.pop()
+                    sdotys.pop()
                     y_hist[state["num_sy_pairs"] % m] = y_tmp
+                    state["num_sy_pairs"] -= 1
                     # If we haven't reached the max number of evals, try again with a
                     # different batch, else continue
                     if state["num_proxy_funcs"] < 2:

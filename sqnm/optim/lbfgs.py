@@ -49,8 +49,10 @@ class LBFGS(SQNBase):
 
     @torch.no_grad()
     def step(  # type: ignore[override]
-        self, closure: Callable[[], float], fn: Callable[[Tensor], Tensor] | None = None
-    ) -> float:
+        self,
+        closure: Callable[[], Tensor],
+        fn: Callable[[Tensor], Tensor] | None = None,
+    ) -> Tensor:
         """
         Perform a single L-BFGS iteration.
 
@@ -66,8 +68,11 @@ class LBFGS(SQNBase):
         line_search_fn = group["line_search_fn"]
 
         state = self.state[self._params[0]]
-        k = state["num_iters"]
-        sy_history = state["sy_history"]
+        k: int = state["num_iters"]
+        s_hist: Tensor = state["s_hist"]
+        y_hist: Tensor = state["y_hist"]
+        alphas: list[float] = state["alphas"]
+        sdotys: list[Tensor] = state["sdotys"]
 
         if line_search_fn == "strong_wolfe" and fn is None:
             raise ValueError("fn parameter is needed for strong Wolfe line search")
@@ -78,6 +83,8 @@ class LBFGS(SQNBase):
         closure = torch.enable_grad()(closure)
 
         orig_loss = closure()  # Populate gradients
+        loss = float(orig_loss)
+
         xk = self._get_param_vector()
         gradk = self._get_grad_vector()
 
@@ -92,22 +99,28 @@ class LBFGS(SQNBase):
                 logger.warning("p_k is not a descent direction.")
 
         if line_search_fn == "strong_wolfe":
-            assert fn is not None
             fn = cast(Callable[[Tensor], Tensor], fn)
-            # Choose step size to satisfy strong Wolfe conditions
-            grad_fn = torch.func.grad(fn)
-            alpha_k = strong_wolfe_line_search(fn, grad_fn, xk, pk, orig_loss, gradk)
-            xk_next = xk + alpha_k * pk
+            grad_and_val_fn = torch.func.grad_and_value(fn)
+            alpha_k, ls_func_evals = strong_wolfe_line_search(
+                grad_and_val_fn, xk, pk, loss, gradk
+            )
         else:
             # Use fixed step size
-            xk_next = xk + lr * pk
+            alpha_k = lr
 
         # Compute and store next iterates
-        self._set_param_vector(xk_next)
+        sk = alpha_k * pk
+        self._add_param_vector(sk)
         closure()  # Recompute gradient after setting new param
         gradk_next = self._get_grad_vector()
-        sy_history[state["num_sy_pairs"] % m] = (xk_next - xk, gradk_next - gradk)
-        state["num_sy_pairs"] += 1
+        yk = gradk_next - gradk
 
+        # Update state
+        alphas.append(alpha_k)
+        sdotys.append(sk.dot(yk))
+        s_hist[state["num_sy_pairs"] % m] = sk
+        y_hist[state["num_sy_pairs"] % m] = yk
+        state["num_sy_pairs"] += 1
         state["num_iters"] += 1
+
         return orig_loss

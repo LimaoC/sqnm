@@ -86,9 +86,11 @@ class MBBFGS(SQNBase):
         eps = group["eps"]
 
         state = self.state[self._params[0]]
-        k = state["num_iters"]
-        s_hist = state["s_hist"]
-        y_hist = state["y_hist"]
+        k: int = state["num_iters"]
+        s_hist: Tensor = state["s_hist"]
+        y_hist: Tensor = state["y_hist"]
+        alphas: list[float] = state["alphas"]
+        sdotys: list[Tensor] = state["sdotys"]
 
         if line_search_fn is not None and fn is None:
             raise ValueError("fn parameter is needed for line search")
@@ -146,9 +148,13 @@ class MBBFGS(SQNBase):
             return orig_loss
 
         self._add_param_vector(sk)
+
+        # Update state
+        alphas.append(alpha_k)
+        sdotys.append(sk.dot(yk))
         s_hist[state["num_sy_pairs"] % m] = sk
         y_hist[state["num_sy_pairs"] % m] = yk
         state["num_sy_pairs"] += 1
-
         state["num_iters"] += 1
+
         return orig_loss

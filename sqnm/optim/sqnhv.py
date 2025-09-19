@@ -131,9 +131,11 @@ class SQNHv(SQNBase):
         curvature_batch_size = group["curvature_batch_size"]
 
         state = self.state[self._params[0]]
-        k = state["num_iters"]
-        s_hist = state["s_hist"]
-        y_hist = state["y_hist"]
+        k: int = state["num_iters"]
+        s_hist: Tensor = state["s_hist"]
+        y_hist: Tensor = state["y_hist"]
+        alphas: list[float] = state["alphas"]
+        sdotys: list[Tensor] = state["sdotys"]
         # Note index t for curvature pairs, which are decoupled from gradient estimates
         xt = state["xt"]
         alpha_start = state["alpha_start"]
@@ -226,9 +228,13 @@ class SQNHv(SQNBase):
                 # by curvature_fn
                 _, yt = hvp(curvature_fn, xt, v=st, create_graph=False, strict=True)
                 state["func_evals"] += 4 * curvature_batch_size
+                sdotys.append(st.dot(yt))
                 s_hist[t % m] = st
                 y_hist[t % m] = yt
             xt.zero_()
 
+        # Update state
+        alphas.append(alpha_k)
         state["num_iters"] += 1
+
         return orig_loss
