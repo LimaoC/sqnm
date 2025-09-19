@@ -26,7 +26,7 @@ def strong_wolfe_line_search(
 
     Parameters:
         fn: function to compute a tuple of (gradient, objective) for a given input,
-            objective function is assumed to eb bounded below along the direction p_k
+            objective function is assumed to be bounded below along the direction p_k
         xk: current iterate
         pk: direction, assumed to be a descent direction
         f_xk: initial function value at xk
