@@ -66,40 +66,9 @@ class SQNHv(SQNBase):
         state["num_sy_pairs"] = -1
         state["xt"] = torch.zeros_like(self._get_param_vector())
         # Used for probabilistic LS
-        state["alpha_start"] = 1.0
-        state["alpha_running_avg"] = state["alpha_start"]
-
-    def _two_loop_recursion(self, grad: Tensor) -> Tensor:
-        """
-        Two loop recursion for computing H_k * grad
-
-        This differs from the standard two loop recursion in that the (s, y) pairs are
-        indexed by t not k (as the curvature pair computations are decoupled from the
-        stochastic gradient computations).
-        """
-        group = self.param_groups[0]
-        m = group["history_size"]
-
-        state = self.state[self._params[0]]
-        # The paper's t index is off by 1 compared to the convention, account for this
-        # They define s_t = x_t - x_{t-1} instead of s_{t-1} = x_t - x_{t-1}
-        t = state["num_sy_pairs"]
-        h = min(t, m)  # Number of curvature pairs to use
-        idxs = torch.arange(t - h, t) % m
-        s = state["s_hist"][idxs]  # [h, d]
-        y = state["y_hist"][idxs]  # [h, d]
-
-        q = grad.clone()
-        sy = torch.sum(s * y, dim=1)  # [h], precompute s.dot(y) for each pair
-        alphas = torch.zeros(h, device=grad.device)
-        for i in reversed(range(h)):
-            alphas[i] = s[i].dot(q) / sy[i]
-            q.sub_(alphas[i] * y[i])
-        r = (sy[-1] / (y[-1].dot(y[-1]))) * q
-        for i in range(h):
-            beta = y[i].dot(r) / sy[i]
-            r.add_((alphas[i] - beta) * s[i])
-        return r
+        if line_search_fn == "prob_wolfe":
+            state["alpha_start"] = 1.0
+            state["alpha_running_avg"] = state["alpha_start"]
 
     @torch.no_grad()
     def step(  # type: ignore[override]
@@ -137,9 +106,7 @@ class SQNHv(SQNBase):
         alphas: list[float] = state["alphas"]
         sdotys: list[Tensor] = state["sdotys"]
         # Note index t for curvature pairs, which are decoupled from gradient estimates
-        xt = state["xt"]
-        alpha_start = state["alpha_start"]
-        alpha_running_avg = state["alpha_running_avg"]
+        xt: Tensor = state["xt"]
 
         if line_search_fn is not None and fn is None:
             raise ValueError("fn parameter is needed for line search")
@@ -196,8 +163,8 @@ class SQNHv(SQNBase):
                         gradk,
                         var_f0,
                         var_df0,
-                        a_running_avg=alpha_running_avg,
-                        a0=alpha_start,
+                        a_running_avg=state["alpha_running_avg"],
+                        a0=state["alpha_start"],
                     )
                 )
                 state["alpha_start"] = alpha_start
