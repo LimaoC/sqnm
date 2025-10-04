@@ -14,7 +14,7 @@ def strong_wolfe_line_search(
     f_xk: float,
     grad_f_xk: Tensor,
     a0: float = 1.0,
-    a_max: float = 100,
+    a_max: float = 10,
     c1: float = 1e-4,
     c2: float = 0.9,
     max_iters: int = 10,
