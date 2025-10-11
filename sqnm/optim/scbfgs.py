@@ -98,7 +98,10 @@ class SCBFGS(SQNBase):
             a = (sksk - 2 * skyk + ykyk).item()
             b = (2 * skyk - 2 * ykyk - eta2 * sksk + eta2 * skyk).item()
             c = (ykyk - eta2 * skyk).item()
-            beta_upper = np.min(np.roots([a, b, c]))
+            if np.all(np.isfinite([a, b, c])):
+                beta_upper = np.min(np.roots([a, b, c]))
+            else:
+                beta_upper = 1
 
         return max(beta_lower, beta_upper)
 
