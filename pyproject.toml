@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sqnm"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
   "numpy>=2.3.3",
   "scipy>=1.15.3",
@@ -21,4 +21,4 @@ license = "MIT"
 Repository = "https://github.com/LimaoC/sqnm.git"
 
 [tool.setuptools]
-packages = ["sqnm"]
+packages = { find = {} }
