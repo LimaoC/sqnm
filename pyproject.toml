@@ -5,8 +5,20 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "sqnm"
 version = "0.0.0"
-authors = [{ name = "Limao Chang" }]
-maintainers = [{ name = "Limao Chang" }]
+dependencies = [
+  "numpy>=2.3.3",
+  "scipy>=1.15.3",
+  "torch>=2.7.1",
+]
+requires-python = ">=3.12"
+authors = [{ name = "Limao Chang", email = "80520563+LimaoC@users.noreply.github.com" }]
+maintainers = [{ name = "Limao Chang", email = "80520563+LimaoC@users.noreply.github.com" }]
+description = "Stochastic Quasi-Newton Methods"
+readme = "README.md"
+license = "MIT"
+
+[project.urls]
+Repository = "https://github.com/LimaoC/sqnm.git"
 
 [tool.setuptools]
 packages = ["sqnm"]
